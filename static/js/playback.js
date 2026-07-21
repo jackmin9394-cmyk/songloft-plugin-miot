@@ -23,6 +23,24 @@ let progressRAF = null;     // requestAnimationFrame ID
 let currentLyrics = [];     // 解析后的歌词数组
 let currentLyricUrl = '';   // 当前歌词 URL
 let lyricFetchTimer = null; // 歌词获取防抖定时器
+let lastBarLyricIndex = -1; // 播放栏当前高亮歌词行索引（去重，避免重复写 DOM）
+
+/**
+ * 根据播放位置更新播放栏当前歌词行。
+ * 与全屏播放器一致，接受插值后的估算位置：播放栏歌词由 RAF 每帧驱动，
+ * 而非只在状态帧到达时刷新，避免因后端 ~4s 设备缓存导致歌词慢几秒才更新。
+ * @param {number} position - 当前播放位置（秒，可为 RAF 插值估算值）
+ */
+function updatePlayerBarLyric(position) {
+    if (currentLyrics.length === 0) return;
+    const idx = getCurrentLyricIndex(currentLyrics, position);
+    if (idx === lastBarLyricIndex) return;
+    lastBarLyricIndex = idx;
+    if (idx >= 0) {
+        const playerBarLyric = document.getElementById('playerBarLyric');
+        if (playerBarLyric) playerBarLyric.textContent = currentLyrics[idx].text;
+    }
+}
 
 /** toggle 防护时间戳（防止过期轮询覆盖 toggle 后的 UI 状态） */
 let lastToggleMs = 0;
@@ -98,6 +116,7 @@ function startProgressAnimation() {
             : estimatedPosition;
 
         updateProgressDOM(clampedPosition, currentDuration);
+        updatePlayerBarLyric(clampedPosition);
 
         progressRAF = requestAnimationFrame(animate);
     }
@@ -306,20 +325,14 @@ export function updatePlayerUI(status) {
         const lyricUrl = status.current_song.lyric_url;
         if (lyricUrl !== currentLyricUrl) {
             currentLyricUrl = lyricUrl;
-            fetchLyrics(lyricUrl);
+            lastBarLyricIndex = -1; // 换歌词源，重置高亮索引强制刷新
+            fetchLyrics(status.current_song.id);
         }
     } else {
         currentLyricUrl = '';
         currentLyrics = [];
+        lastBarLyricIndex = -1;
         if (playerBarLyric) playerBarLyric.textContent = '暂无歌词';
-    }
-
-    // 更新当前歌词行
-    if (currentLyrics.length > 0) {
-        const lyricIdx = getCurrentLyricIndex(currentLyrics, currentPosition);
-        if (lyricIdx >= 0) {
-            if (playerBarLyric) playerBarLyric.textContent = currentLyrics[lyricIdx].text;
-        }
     }
 
     // 更新歌曲信息
@@ -373,6 +386,8 @@ export function updatePlayerUI(status) {
     } else {
         stopProgressAnimation();
         updateProgressDOM(currentPosition, currentDuration);
+        // 非播放态 RAF 不跑，在此直接同步一次播放栏歌词行（暂停/首帧）
+        updatePlayerBarLyric(currentPosition);
     }
 
     // 高亮当前播放歌曲
@@ -659,6 +674,17 @@ export function loadDeviceStatus(force) {
 }
 
 /**
+ * 应用一条推送/拉取到的设备状态到 UI。
+ * 与 loadDeviceStatus 共用同一个 2s toggle 抑制窗口：刚点过播放/暂停等操作的 2s 内，
+ * 忽略此次状态，避免过期数据覆盖乐观 UI。供 WebSocket 状态推送（status-stream.js）调用。
+ */
+export function handlePushedStatus(status) {
+    if (!status) return;
+    if (lastToggleMs > 0 && (Date.now() - lastToggleMs < 2000)) return;
+    updatePlayerUI(status);
+}
+
+/**
  * 根据当前选中设备的缓存数据，将音量同步到 UI
  * 数据源：/mina/devices 接口返回的 device.volume（持久化属性）
  * 调用时机：设备列表刷新后、设备切换后、初始加载完成后
@@ -915,10 +941,13 @@ export function fetchWithAuth(url, timeoutMs = DEFAULT_FETCH_TIMEOUT_MS) {
 
 /**
  * 获取并解析歌词
- * @param {string} lyricUrl - 歌词 URL
+ * 经插件后端 /lyric 代理拉取：主程序对无歌词的 remote 歌曲会返回 404（设计如此，
+ * 用于触发歌词插件懒搜索），直连会被浏览器记为网络错误刷控制台。插件后端把 404
+ * 归一化为 200 空 payload，前端只与本插件端点通信，从而消除控制台 404 噪音。
+ * @param {number|string} songId - 歌曲 ID
  */
-function fetchLyrics(lyricUrl) {
-    if (!lyricUrl) return;
+function fetchLyrics(songId) {
+    if (!songId) return;
 
     if (lyricFetchTimer) {
         clearTimeout(lyricFetchTimer);
@@ -927,25 +956,21 @@ function fetchLyrics(lyricUrl) {
 
     lyricFetchTimer = setTimeout(() => {
         lyricFetchTimer = null;
-        fetchWithAuth(lyricUrl).then(blob => {
-            if (!blob) return;
-            blob.text().then(rawText => {
-                let lrcText = rawText;
-                try {
-                    const json = JSON.parse(rawText);
-                    if (json.lyric) {
-                        lrcText = json.lyric;
-                    } else if (json.success && json.data && json.data.lyric) {
-                        lrcText = json.data.lyric;
-                    } else if (json.data) {
-                        lrcText = typeof json.data === 'string' ? json.data : '';
-                    }
-                } catch {
-                    // 不是 JSON，直接使用原始文本
-                }
-                currentLyrics = parseLrc(lrcText);
-            });
+        apiGet('/lyric?song_id=' + encodeURIComponent(songId)).then(data => {
+            const lrcText = (data && typeof data.lyric === 'string') ? data.lyric : '';
+            currentLyrics = parseLrc(lrcText);
+            lastBarLyricIndex = -1; // 新歌词就绪，重置高亮索引
+            if (currentLyrics.length === 0) {
+                const playerBarLyric = document.getElementById('playerBarLyric');
+                if (playerBarLyric) playerBarLyric.textContent = '暂无歌词';
+            } else if (!isCurrentlyPlaying) {
+                // 暂停态 RAF 不跑，歌词异步到达后直接同步一次
+                updatePlayerBarLyric(currentPosition);
+            }
         }).catch(err => {
+            currentLyrics = [];
+            const playerBarLyric = document.getElementById('playerBarLyric');
+            if (playerBarLyric) playerBarLyric.textContent = '暂无歌词';
             console.warn('获取歌词失败:', err);
         });
     }, 500);

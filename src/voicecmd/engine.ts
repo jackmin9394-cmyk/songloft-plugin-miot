@@ -97,7 +97,7 @@ const URL_HEALTH_CHECK_TIMEOUT_MS = 3000;
 
 const FIXED_CONTROL_COMMAND_TYPES = new Set(['set_play_mode', 'set_volume', 'next', 'previous', 'stop']);
 const SEARCH_COMMAND_TYPES = new Set(['play_song', 'play_playlist']);
-const BUILTIN_STOP_KEYWORDS = ['暂停播放', '停止播放', '暂停音乐', '停一下', 'pause', 'stop'];
+const BUILTIN_STOP_KEYWORDS = ['暂停播放', '停止播放', '暂停音乐', '停一下', 'pause', 'stop', '暂停'];
 
 /**
  * 有界跳字子序列匹配：在 query 的 rune 数组中按序查找关键词，允许中间插入有限字符。
@@ -158,7 +158,7 @@ export function getDefaultVoiceCommands(): VoiceCommand[] {
     { type: 'set_volume', keywords: ['小声一点', '声音小一点', '音量小一点'], param: 'down', enabled: true },
     { type: 'next', keywords: ['下一首', '切歌', '换一首', '下一曲'], enabled: true },
     { type: 'previous', keywords: ['上一首', '上一曲'], enabled: true },
-    { type: 'stop', keywords: ['暂停播放', '停止播放', '暂停音乐', '停一下', 'pause', 'stop', '停止', '别播了', '关掉音乐', '关机', '关闭'], enabled: true },
+    { type: 'stop', keywords: ['暂停播放', '停止播放', '暂停音乐', '停一下', 'pause', 'stop', '停止', '别播了', '关掉音乐', '关机', '关闭', '暂停'], enabled: true },
   ];
 }
 
@@ -287,7 +287,7 @@ export class VoiceEngine {
       const aiResult = await this.aiAnalyzer.analyze(query, aiConfig);
       if (aiResult) {
         songloft.log.info(`[VoiceEngine] [AI] Done: action=${aiResult.action} confidence=${aiResult.confidence} params=${JSON.stringify(aiResult.params)}`);
-        if (aiResult.confidence === 'high' && aiResult.action !== 'unknown') {
+        if (aiResult.confidence !== 'low' && aiResult.action !== 'unknown') {
           songloft.log.info(`[VoiceEngine] [AI] → Executing fallback (high confidence, action=${aiResult.action})`);
           const playedSong = await this.executeAIResult(aiResult, accountId, msg.device_id);
           if (memoryEnabled && aiResult.action === 'play_song' && playedSong) {
@@ -510,7 +510,7 @@ export class VoiceEngine {
       const aiStart = Date.now();
       const aiResult = await this.aiAnalyzer.analyze(q, aiConfig);
       songloft.log.info(`[VoiceEngine] [Test] AI analyze done in ${Date.now() - aiStart}ms → ${aiResult ? `action=${aiResult.action} confidence=${aiResult.confidence}` : 'null'}`);
-      if (aiResult && aiResult.confidence === 'high' && aiResult.action !== 'unknown') {
+      if (aiResult && aiResult.confidence !== 'low' && aiResult.action !== 'unknown') {
         const search = await this.previewForAI(aiResult);
         const execStart = Date.now();
         await this.executeAIResult(aiResult, acc, deviceId);
@@ -814,12 +814,12 @@ export class VoiceEngine {
         await this.executeSetPlayMode(accountId, deviceId, mode);
         break;
       }
-      case 'set_volume': {
+      /*case 'set_volume': {
         const direction = result.params.direction || 'absolute';
         const volume = result.params.volume;
         await this.executeSetVolume(accountId, deviceId, direction, volume !== undefined ? String(volume) : '');
         break;
-      }
+      }*/
       case 'next':
         await this.executeNext(accountId, deviceId);
         break;
@@ -1239,8 +1239,9 @@ export class VoiceEngine {
       case 'external_search': {
         // 外部搜索播放成功后，由 playSearchResult 增量把这首歌加入索引（见 addImportedSong），
         // 后续可直接本地命中，无需为一首独立远程歌曲重建全部歌单缓存。
+        // 传入 pm：若已配置导入歌单，接管为完整歌单播放，播完自动续播（issue #53）。
         const played = await this.onlineSearcher.playSearchResult(
-          candidate.song, accountId, deviceId, this.minaService, this.indexingManager,
+          candidate.song, accountId, deviceId, this.minaService, this.indexingManager, pm,
         );
         return played ? {
           songName: candidate.song.title,
@@ -1272,8 +1273,10 @@ export class VoiceEngine {
       return false;
     }
 
-    const standaloneName = standalone.artist ? `${standalone.title}-${standalone.artist}` : standalone.title;
-    const played = await this.minaService.playURL(accountId, deviceId, playUrl, standaloneName);
+    const played = await this.minaService.playURL(accountId, deviceId, playUrl, {
+      title: standalone.title,
+      artist: standalone.artist,
+    });
     if (!played) {
       songloft.log.error('[VoiceEngine] Failed to play standalone remote song: ' + standalone.title + ' - ' + standalone.artist);
       return false;
@@ -1554,11 +1557,18 @@ export class VoiceEngine {
       return;
     }
 
+    const resumed = await pm.resumePlayback();
+    if (resumed) {
+      songloft.log.info('[VoiceEngine] Playback resumed (continue position) after voice interaction');
+      return;
+    }
+
     const ok = await pm.replayCurrent();
     if (ok) {
       songloft.log.info('[VoiceEngine] Playback restored via replay after voice interaction');
     } else {
       songloft.log.warn('[VoiceEngine] Failed to restore playback after voice interaction');
+      await pm.stop();
     }
   }
 

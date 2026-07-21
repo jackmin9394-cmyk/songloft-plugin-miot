@@ -98,6 +98,16 @@ function syncManagerFromDeviceState(
     manager.resetAutoNextTimer(devicePosition);
   } else if (localState === 'playing' && deviceState === 'playing' && manager.isVoiceSuspended()) {
     manager.resetAutoNextTimer(devicePosition);
+  } else if (localState === 'playing' && deviceState === 'playing') {
+    // 远程歌曲需要缓冲时间，本地定时器从发送 URL 就开始计时，
+    // 但设备要等缓冲完成才开始播放，导致本地位置显著超前设备实际位置。
+    // 只在播放早期用设备实际位置校准定时器，防止歌曲提前切歌。
+    // 歌曲接近结束后设备可能重拉同一首并上报小进度，此时不能回拨定时器，
+    // 否则自动下一首会被无限推迟。
+    const localPosition = manager.getPosition();
+    if (localPosition - devicePosition >= 5 && manager.canCalibrateAutoNextTimer(devicePosition)) {
+      manager.resetAutoNextTimer(devicePosition);
+    }
   }
 }
 
@@ -119,6 +129,91 @@ function resolveReportPosition(localState: PlayState, deviceState: string, local
     return localPosition;
   }
   return devicePosition;
+}
+
+/**
+ * 解析设备的播放状态（本地播放状态优先，设备数据用于音量/进度校准）。
+ *
+ * 抽取自原 `GET /player/status` handler，供 HTTP 端点与 WebSocket 推送循环
+ * 共用同一份状态融合逻辑，避免两条链路结果漂移。返回的对象即前端消费的 `data`
+ * 负载：`{ ...localStatus, state, position, duration, volume }`。
+ */
+export async function resolvePlayerStatus(
+  playlistManagerMap: PlaylistManagerMap,
+  minaService: MinaService,
+  account_id: string,
+  device_id: string,
+): Promise<Record<string, any>> {
+  const manager = await playlistManagerMap.getOrCreate(account_id, device_id);
+  const localStatus = manager.getStatus();
+  const cacheKey = account_id + ':' + device_id;
+  const now = Date.now();
+
+  // 检查设备状态缓存（4秒内直接复用，避免多调用方重复查询设备）
+  const cached = deviceStatusCache.get(cacheKey);
+  if (cached && (now - cached.timestamp) < DEVICE_STATUS_TTL) {
+    const duration = localStatus.duration > 0 ? localStatus.duration : cached.duration;
+
+    // 播放中时用缓存position + 已过时间推算当前位置，避免返回过时进度
+    let position = cached.position;
+    if (cached.state === 'playing' && duration > 0) {
+      const elapsed = (now - cached.timestamp) / 1000;
+      position = Math.min(cached.position + elapsed, duration);
+    }
+
+    syncManagerFromDeviceState(manager, localStatus.state, cached.state, cached.position);
+
+    // 本地已 stop 时，不让设备残留的播放状态覆盖，避免前端进度条跳动
+    const reportState = resolveReportState(localStatus.state, cached.state);
+    const reportPosition = resolveReportPosition(localStatus.state, cached.state, localStatus.position, position);
+
+    return { ...localStatus, state: reportState, position: reportPosition, duration, volume: cached.volume };
+  }
+
+  // 缓存过期，从设备获取真实播放状态
+  let volume = cached?.volume ?? -1;
+  let realPosition = localStatus.position;
+  let realDuration = localStatus.duration;
+  let realState = localStatus.state;
+  try {
+    const raw = await getOrFetchDeviceStatus(account_id, device_id, () => minaService.getPlayerStatus(account_id, device_id));
+    const info = raw?.data?.info;
+    if (typeof info === 'string') {
+      const parsed = JSON.parse(info);
+      if (typeof parsed.volume === 'number') {
+        if (!cached?.volumeLockedUntil || Date.now() > cached.volumeLockedUntil) {
+          volume = parsed.volume;
+        }
+      }
+      if (parsed.status === 1) realState = 'playing';
+      else if (parsed.status === 2) realState = 'paused';
+      else if (parsed.status === 0) realState = 'stopped';
+      if (parsed.play_song_detail) {
+        const d = parsed.play_song_detail;
+        if (typeof d.position === 'number') realPosition = Math.floor(d.position / 1000);
+        if (typeof d.duration === 'number') realDuration = Math.floor(d.duration / 1000);
+      }
+    }
+  } catch (e: any) {
+    songloft.log.warn('[player/status] getPlayerStatus failed: ' + String(e));
+  }
+
+  // 本地歌曲 duration（来自文件元数据）比设备报告的更可靠，
+  // 设备在 MUSIC 模式（keepLight=true）下经常报告错误的 duration
+  if (localStatus.duration > 0) {
+    realDuration = localStatus.duration;
+  }
+
+  // 更新缓存
+  deviceStatusCache.set(cacheKey, { volume, state: realState, position: realPosition, duration: realDuration, timestamp: now, volumeLockedUntil: cached?.volumeLockedUntil ?? 0 });
+
+  syncManagerFromDeviceState(manager, localStatus.state, realState, realPosition);
+
+  // 本地已 stop 时，不让设备残留的播放状态覆盖
+  const reportState = resolveReportState(localStatus.state, realState);
+  const reportPosition = resolveReportPosition(localStatus.state, realState, localStatus.position, realPosition);
+
+  return { ...localStatus, state: reportState, position: reportPosition, duration: realDuration, volume };
 }
 
 /**
@@ -408,82 +503,8 @@ export function registerPlaylistHandlers(
         return jsonResponse({ success: false, error: 'account_id and device_id are required' });
       }
 
-      const manager = await playlistManagerMap.getOrCreate(account_id, device_id);
-      const localStatus = manager.getStatus();
-      const cacheKey = account_id + ':' + device_id;
-      const now = Date.now();
-
-      // 检查设备状态缓存（4秒内直接复用，避免多调用方重复查询设备）
-      const cached = deviceStatusCache.get(cacheKey);
-      if (cached && (now - cached.timestamp) < DEVICE_STATUS_TTL) {
-        const duration = localStatus.duration > 0 ? localStatus.duration : cached.duration;
-
-        // 播放中时用缓存position + 已过时间推算当前位置，避免返回过时进度
-        let position = cached.position;
-        if (cached.state === 'playing' && duration > 0) {
-          const elapsed = (now - cached.timestamp) / 1000;
-          position = Math.min(cached.position + elapsed, duration);
-        }
-
-        syncManagerFromDeviceState(manager, localStatus.state, cached.state, cached.position);
-
-        // 本地已 stop 时，不让设备残留的播放状态覆盖，避免前端进度条跳动
-        const reportState = resolveReportState(localStatus.state, cached.state);
-        const reportPosition = resolveReportPosition(localStatus.state, cached.state, localStatus.position, position);
-
-        return jsonResponse({
-          success: true,
-          data: { ...localStatus, state: reportState, position: reportPosition, duration, volume: cached.volume },
-        });
-      }
-
-      // 缓存过期，从设备获取真实播放状态
-      let volume = cached?.volume ?? -1;
-      let realPosition = localStatus.position;
-      let realDuration = localStatus.duration;
-      let realState = localStatus.state;
-      try {
-        const raw = await getOrFetchDeviceStatus(account_id, device_id, () => minaService.getPlayerStatus(account_id, device_id));
-        const info = raw?.data?.info;
-        if (typeof info === 'string') {
-          const parsed = JSON.parse(info);
-          if (typeof parsed.volume === 'number') {
-            if (!cached?.volumeLockedUntil || Date.now() > cached.volumeLockedUntil) {
-              volume = parsed.volume;
-            }
-          }
-          if (parsed.status === 1) realState = 'playing';
-          else if (parsed.status === 2) realState = 'paused';
-          else if (parsed.status === 0) realState = 'stopped';
-          if (parsed.play_song_detail) {
-            const d = parsed.play_song_detail;
-            if (typeof d.position === 'number') realPosition = Math.floor(d.position / 1000);
-            if (typeof d.duration === 'number') realDuration = Math.floor(d.duration / 1000);
-          }
-        }
-      } catch (e: any) {
-        songloft.log.warn('[player/status] getPlayerStatus failed: ' + String(e));
-      }
-
-      // 本地歌曲 duration（来自文件元数据）比设备报告的更可靠，
-      // 设备在 MUSIC 模式（keepLight=true）下经常报告错误的 duration
-      if (localStatus.duration > 0) {
-        realDuration = localStatus.duration;
-      }
-
-      // 更新缓存
-      deviceStatusCache.set(cacheKey, { volume, state: realState, position: realPosition, duration: realDuration, timestamp: now, volumeLockedUntil: cached?.volumeLockedUntil ?? 0 });
-
-      syncManagerFromDeviceState(manager, localStatus.state, realState, realPosition);
-
-      // 本地已 stop 时，不让设备残留的播放状态覆盖
-      const reportState = resolveReportState(localStatus.state, realState);
-      const reportPosition = resolveReportPosition(localStatus.state, realState, localStatus.position, realPosition);
-
-      return jsonResponse({
-        success: true,
-        data: { ...localStatus, state: reportState, position: reportPosition, duration: realDuration, volume },
-      });
+      const data = await resolvePlayerStatus(playlistManagerMap, minaService, account_id, device_id);
+      return jsonResponse({ success: true, data });
     } catch (e: any) {
       return jsonResponse({ success: false, error: e.message || String(e) });
     }

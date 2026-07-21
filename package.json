@@ -1,6 +1,6 @@
 {
   "name": "miot",
-  "version": "2026.7.16",
+  "version": "2026.7.21",
   "description": "通过 MIoT 协议把歌曲投放到智能音箱设备",
   "private": true,
   "scripts": {
@@ -15,8 +15,8 @@
     "sync:tts": "node scripts/sync-tts-commands.mjs"
   },
   "devDependencies": {
-    "@songloft/plugin-builder": "^2.4.3",
-    "@songloft/plugin-sdk": "^2.9.0",
+    "@songloft/plugin-builder": "^2.12.3",
+    "@songloft/plugin-sdk": "^2.12.3",
     "pinyin-pro": "^3.28.1",
     "segmentit": "^2.0.3",
     "typescript": "^5.9.3"

@@ -85,9 +85,10 @@ export class PlaylistManager {
    * @param playlistId - 歌单ID
    * @param startIndex - 起始歌曲索引（默认0）
    * @param mode - 播放模式（默认order）
+   * @param opts.randomStart - 忽略 startIndex，加载歌单后随机挑一首作为起点
    * @returns 是否成功
    */
-  async play(playlistId: number, startIndex?: number, mode?: PlayMode): Promise<boolean> {
+  async play(playlistId: number, startIndex?: number, mode?: PlayMode, opts?: { randomStart?: boolean }): Promise<boolean> {
     // 立即停止定时器和重置状态，防止 loadPlaylistSongs 期间旧定时器触发 onSongFinished
     this.stopCheckTimer();
     this.state = 'idle';
@@ -108,8 +109,12 @@ export class PlaylistManager {
 
     // 设置播放参数
     this.playlistId = playlistId;
-    this.currentIndex = (startIndex !== undefined && startIndex >= 0 && startIndex < this.songs.length)
-      ? startIndex : 0;
+    if (opts?.randomStart && this.songs.length > 0) {
+      this.currentIndex = Math.floor(Math.random() * this.songs.length);
+    } else {
+      this.currentIndex = (startIndex !== undefined && startIndex >= 0 && startIndex < this.songs.length)
+        ? startIndex : 0;
+    }
     this.playMode = mode || 'order';
     this.randomPlayed = new Set();
 
@@ -124,6 +129,58 @@ export class PlaylistManager {
     await this.persistState();
 
     songloft.log.info(`[PlaylistManager] Playlist started id=${playlistId} index=${this.currentIndex} mode=${this.playMode} total=${this.songs.length}`);
+    return true;
+  }
+
+  /**
+   * 播放歌单并从指定歌曲 ID 开始播放
+   * 用于外部搜索导入并追加到歌单后，接管为「完整歌单播放」，
+   * 使歌曲播完后由切歌定时器自动续播歌单其余歌曲（issue #53）。
+   * 找不到该歌曲时回退到从歌单头部播放。
+   * @param playlistId - 歌单ID
+   * @param songId - 起始歌曲ID（通常是刚追加到歌单末尾的那首）
+   * @param mode - 播放模式（默认order）
+   * @returns 是否成功
+   */
+  async playPlaylistFromSong(playlistId: number, songId: number, mode?: PlayMode): Promise<boolean> {
+    // 立即停止定时器和重置状态，防止 loadPlaylistSongs 期间旧定时器触发 onSongFinished
+    this.stopCheckTimer();
+    this.state = 'idle';
+    this.playStartTimeMs = 0;
+    this._lastLoadNotFound = false;
+
+    const loaded = await this.loadPlaylistSongs(playlistId);
+    if (!loaded) {
+      songloft.log.error('[PlaylistManager] playPlaylistFromSong: loadPlaylistSongs returned false, playlistId=' + playlistId);
+      return false;
+    }
+
+    if (this.songs.length === 0) {
+      songloft.log.warn('[PlaylistManager] Playlist is empty: ' + playlistId);
+      return false;
+    }
+
+    // 定位目标歌曲索引；追加的歌曲通常在末尾，找不到时回退到从头播放
+    let startIndex = this.songs.findIndex(s => s.id === songId);
+    if (startIndex < 0) {
+      songloft.log.warn(`[PlaylistManager] Song ${songId} not found in playlist ${playlistId}, starting from head`);
+      startIndex = 0;
+    }
+
+    this.playlistId = playlistId;
+    this.currentIndex = startIndex;
+    this.playMode = mode || 'order';
+    this.randomPlayed = new Set();
+
+    const ok = await this.playCurrent();
+    if (!ok) {
+      songloft.log.error('[PlaylistManager] playPlaylistFromSong: Failed to play current song');
+      return false;
+    }
+
+    await this.persistState();
+
+    songloft.log.info(`[PlaylistManager] Playlist started from song id=${songId} playlistId=${playlistId} index=${startIndex} mode=${this.playMode} total=${this.songs.length}`);
     return true;
   }
 
@@ -283,6 +340,31 @@ export class PlaylistManager {
   }
 
   /**
+   * 是否仍处于允许用设备进度校准本地自动切歌定时器的窗口。
+   * 仅用于播放刚开始的缓冲修正；歌曲接近结束后不允许设备端小进度回拨定时器，
+   * 否则某些音箱循环拉同一 URL 时会把自动下一首无限推迟。
+   */
+  canCalibrateAutoNextTimer(devicePositionSec: number): boolean {
+    const song = this.getCurrentSong();
+    if (this.state !== 'playing' || !song || song.duration <= 0 || this.playStartTimeMs <= 0) {
+      return false;
+    }
+
+    const elapsedSec = (Date.now() - this.playStartTimeMs) / 1000;
+    const remainingSec = song.duration - elapsedSec;
+    if (remainingSec <= 15 || elapsedSec >= Math.max(45, song.duration * 0.5)) {
+      return false;
+    }
+
+    // 播放一段时间后设备又回到开头，通常表示音箱在重拉同一首，不应用它重置自动切歌。
+    if (elapsedSec > 15 && devicePositionSec < 3) {
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
    * 恢复播放（使用 play 接口继续，不重发 URL）
    * 用于语音命令（如调音量）中断 URL 播放后恢复
    * 同时重置切歌定时器以补偿暂停时间
@@ -398,6 +480,9 @@ export class PlaylistManager {
     if (remaining > 0) {
       this.startCheckTimer(remaining);
       songloft.log.info(`[PlaylistManager] Timer reset: remaining=${remaining.toFixed(1)}s`);
+    } else {
+      this.startCheckTimer(0.1);
+      songloft.log.info(`[PlaylistManager] Timer reset: song ended (remaining=${remaining.toFixed(1)}s), triggering auto-next`);
     }
   }
 
@@ -515,9 +600,11 @@ export class PlaylistManager {
 
     songloft.log.info(`[PlaylistManager] Playing song index=${this.currentIndex} title=${song.title} artist=${song.artist} duration=${song.duration}`);
 
-    // 调用小爱音箱播放（传「歌名-歌手」供触屏歌词模式匹配曲库）
-    const songName = song.artist ? `${song.title}-${song.artist}` : song.title;
-    const ok = await this.minaService.playURL(this.accountId, this.deviceId, songURL, songName);
+    // 调用小爱音箱播放（传结构化歌曲信息供触屏歌词模式匹配曲库）
+    const ok = await this.minaService.playURL(this.accountId, this.deviceId, songURL, {
+      title: song.title,
+      artist: song.artist,
+    });
     if (!ok) {
       songloft.log.error('[PlaylistManager] Failed to play URL on device');
       return false;
@@ -534,7 +621,48 @@ export class PlaylistManager {
       songloft.log.warn('[PlaylistManager] Song duration invalid, no auto-next timer: ' + song.duration);
     }
 
+    this.prefetchNextSong();
+
     return true;
+  }
+
+  /**
+   * 预缓存下一首歌曲（fire-and-forget）
+   * 调用后端 ?prefetch=1 端点触发异步缓存+转码，减少切歌时的冷启动延迟。
+   * force_mp3 开启时给 prefetch URL 也追加 format=mp3，使预热的转码产物与真实播放 URL
+   * （buildSongURL 的 &format=mp3）命中同一缓存键；否则预热的是源格式、播放要 mp3，
+   * 切歌时 mp3 转码仍冷启动，预热白做。
+   */
+  private prefetchNextSong(): void {
+    const nextIdx = this.getNextIndex();
+    if (nextIdx < 0 || nextIdx === this.currentIndex) return;
+
+    const nextSong = this.songs[nextIdx];
+    if (!nextSong || !nextSong.url) return;
+    if (nextSong.type === 'local') return;
+    if (nextSong.url.startsWith('http://') || nextSong.url.startsWith('https://')) return;
+
+    // 捕获到局部常量：跨 async 边界后 TS 不再对 nextSong.url 做非空收窄。
+    const songUrl = nextSong.url;
+    const title = nextSong.title;
+
+    void (async () => {
+      let forceMp3 = false;
+      try {
+        const config = await this.configManager.getConfig();
+        forceMp3 = !!config.force_mp3;
+      } catch {
+        // 读配置失败按不强制处理，仍预热源格式
+      }
+      const separator = songUrl.includes('?') ? '&' : '?';
+      const prefetchPath = songUrl + separator + 'prefetch=1' + (forceMp3 ? '&format=mp3' : '');
+      try {
+        await callHostAPI('GET', prefetchPath, undefined, { timeoutMs: 5000 });
+        songloft.log.info(`[PlaylistManager] Prefetch next song index=${nextIdx} title=${title}${forceMp3 ? ' (mp3)' : ''}`);
+      } catch (e) {
+        songloft.log.warn('[PlaylistManager] Prefetch failed: ' + String(e));
+      }
+    })();
   }
 
   /**
@@ -638,10 +766,12 @@ export class PlaylistManager {
   private startCheckTimer(durationSec: number): void {
     this.stopCheckTimer();
 
-    const delayMs = Math.floor(durationSec * 1000);
+    const delayMs = Math.max(1, Math.floor(durationSec * 1000));
     songloft.log.info('[PlaylistManager] Timer registered delayMs=' + delayMs);
 
     this.checkTimer = setTimeout(() => {
+      this.checkTimer = null;
+      songloft.log.info('[PlaylistManager] Timer fired');
       this.onSongFinished().catch(e => {
         songloft.log.error('[PlaylistManager] onSongFinished error: ' + String(e));
       });
@@ -667,6 +797,8 @@ export class PlaylistManager {
       return;
     }
 
+    songloft.log.info(`[PlaylistManager] Song finished, advancing from index=${this.currentIndex}`);
+
     // 通知后端当前歌曲播放完成（触发 JS 插件播放事件广播）
     const finishedSong = this.songs[this.currentIndex];
     if (finishedSong && finishedSong.id > 0) {
@@ -687,11 +819,36 @@ export class PlaylistManager {
     const ok = await this.playCurrent();
     if (ok) {
       await this.persistState();
-    } else {
-      songloft.log.error('[PlaylistManager] Auto-next failed, stopping');
-      this.state = 'stopped';
-      this.playStartTimeMs = 0;
+      return;
     }
+
+    // 第一次失败（常见于设备超时 code=3012），等 3 秒重试当前歌曲
+    const retryIndex = this.currentIndex;
+    songloft.log.warn('[PlaylistManager] Auto-next play failed, retrying in 3s');
+    await new Promise(r => setTimeout(r, 3000));
+    if (this.state !== 'playing' || this.currentIndex !== retryIndex) return;
+
+    const retryOk = await this.playCurrent();
+    if (retryOk) {
+      await this.persistState();
+      return;
+    }
+
+    // 重试仍失败，尝试跳到下一首
+    const skipIdx = this.getNextIndex();
+    if (skipIdx >= 0 && skipIdx !== this.currentIndex) {
+      songloft.log.warn('[PlaylistManager] Retry failed, skipping to next song');
+      this.currentIndex = skipIdx;
+      const skipOk = await this.playCurrent();
+      if (skipOk) {
+        await this.persistState();
+        return;
+      }
+    }
+
+    songloft.log.error('[PlaylistManager] Auto-next failed after retry, stopping');
+    this.state = 'stopped';
+    this.playStartTimeMs = 0;
   }
 
   /**

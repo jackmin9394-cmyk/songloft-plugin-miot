@@ -1,5 +1,5 @@
 import { createRouter } from '@songloft/plugin-sdk';
-import type { HTTPRequest, HTTPResponse } from '@songloft/plugin-sdk';
+import type { HTTPRequest, HTTPResponse, WebSocketRequest, InboundWebSocket } from '@songloft/plugin-sdk';
 import { ConfigManager } from './config/manager';
 import { AccountManager } from './account/manager';
 import { AuthService } from './auth/service';
@@ -25,9 +25,12 @@ import { registerScheduleHandlers } from './handlers/schedule';
 import { registerVoiceCommandHandlers } from './handlers/voice_command';
 import { registerIndexingHandlers } from './handlers/indexing';
 import { registerMemoryHandlers } from './handlers/memory';
+import { registerLyricHandlers } from './handlers/lyric';
 import { registerSearchProviderComm } from './handlers/search_registry';
 import { setHostBaseUrl } from './utils/http';
 import { setPollDebug } from './utils/debug';
+import { initStatusStream, handleStatusWebSocket, WS_STATUS_PATH } from './ws/status-stream';
+import { initConversationStream, handleConversationWebSocket, WS_CONVERSATION_PATH } from './ws/conversation-stream';
 
 const router = createRouter();
 
@@ -57,6 +60,9 @@ async function onInit(): Promise<void> {
   playlistManagerMap = new PlaylistManagerMap(minaService, configManager);
   memoryService = new MemoryService();
 
+  // 注入状态推送依赖（WebSocket 订阅端点 /status/ws 使用）
+  initStatusStream(playlistManagerMap, minaService);
+
   // 从配置中读取服务器地址并设置音箱播放 URL 基础地址
   const pluginConfig = await configManager.getConfig();
   if (pluginConfig.server_host) {
@@ -68,6 +74,8 @@ async function onInit(): Promise<void> {
   setPollDebug(pluginConfig.conversation_poll_debug ?? false);
 
   conversationMonitor = new ConversationMonitor(accountManager, configManager);
+  // 注入对话推送依赖（WebSocket 订阅端点 /conversation/ws 使用）
+  initConversationStream(conversationMonitor);
   voiceEngine = new VoiceEngine(configManager, accountManager, minaService, playlistManagerMap, indexingManager, new AIAnalyzer(), memoryService);
 
   const executor = new TaskExecutor(configManager, accountManager, minaService, playlistManagerMap, indexingManager, conversationMonitor);
@@ -92,6 +100,7 @@ async function onInit(): Promise<void> {
   registerVoiceCommandHandlers(router, configManager, voiceEngine);
   registerIndexingHandlers(router, indexingManager);
   registerMemoryHandlers(router, memoryService, configManager);
+  registerLyricHandlers(router);
 
   // 注册「搜索源候选」的插件间通信入口（其他插件经 comm 自注册）
   registerSearchProviderComm(configManager);
@@ -141,7 +150,21 @@ async function onHTTPRequest(req: HTTPRequest): Promise<HTTPResponse> {
   return await router.handle(req);
 }
 
+// 入站 WebSocket：播放状态推送订阅（/status/ws）+ 对话记录推送订阅（/conversation/ws）
+async function onWebSocket(req: WebSocketRequest, socket: InboundWebSocket): Promise<void> {
+  if (req.path === WS_STATUS_PATH) {
+    await handleStatusWebSocket(req, socket);
+    return;
+  }
+  if (req.path === WS_CONVERSATION_PATH) {
+    await handleConversationWebSocket(req, socket);
+    return;
+  }
+  await socket.close(1008, 'unknown websocket path');
+}
+
 // 暴露为全局（QuickJS 需要显式声明）。SDK 0.8+ 已正式支持 async 签名。
 globalThis.onInit = onInit;
 globalThis.onDeinit = onDeinit;
 globalThis.onHTTPRequest = onHTTPRequest;
+globalThis.onWebSocket = onWebSocket;
