@@ -58,7 +58,7 @@ MIoT 可以负责：
 - 本地搜索
 - 在线搜索聚合
 - 播放请求调度
-- Downloader 调用
+- 外部能力调度（仅在外部合同完成验证后）
 - 扩展能力状态展示
 
 MIoT 不负责：
@@ -70,7 +70,7 @@ MIoT 不负责：
 - 自己维护下载队列
 - 虚构未经确认的接口或字段
 
-## 已确认的搜索接口
+## 已确认的搜索调用协议
 
 搜索源注册：
 
@@ -84,11 +84,31 @@ register-search-provider
 unregister-search-provider
 ```
 
-搜索提供方接口：
+搜索源列表接口：
+
+```text
+GET /api/v1/jsplugin/miot/search-providers
+```
+
+真实响应外层为：
+
+```json
+{
+  "providers": []
+}
+```
+
+该接口不使用通用 `success/data` 外层包装。provider 名称和状态必须动态读取；只有 `installed = true` 且 `active = true` 时，才可显示对应在线能力。
+
+provider 默认应实现的搜索子路径：
 
 ```text
 POST /api/search/topone
 ```
+
+MIoT 自身不提供 `POST /api/search/topone`，MIoT 是 provider topone 协议的调用方。当前 MIoT 仓库只能确认调用协议，不能确认每个 provider 已经实际部署该路由。不得把 provider 外部路由描述成 MIoT 内部 Router。
+
+每个 provider 当前返回一个 `data` 对象，不是候选数组。
 
 搜索源名称必须动态读取。
 
@@ -103,15 +123,15 @@ POST /api/search/topone
 - 文件大小
 - 版本数量
 
-## 已确认的 Downloader 接口
+## 候选外部 Downloader 合同
 
-使用：
+供后续外部仓库审计的候选完整路径：
 
 ```text
 POST /api/v1/jsplugin/downloader/api/download
 ```
 
-请求体：
+候选请求体：
 
 ```json
 {
@@ -119,7 +139,19 @@ POST /api/v1/jsplugin/downloader/api/download
 }
 ```
 
-必须使用 Songloft 返回的真实 `song_id`。
+该合同无法由当前 MIoT 仓库独立验证。实施前必须审计 Downloader 仓库，并确认：
+
+- `entryPath`
+- 内部路由
+- 外部完整路径
+- 认证方式
+- 请求结构
+- 响应结构
+- 错误码
+- `installed` / `active` 检测
+- 下载管理页面跳转
+
+验证完成前不得把候选合同写入 MIoT 正式代码，Downloader 开发阶段保持阻塞。验证通过后如采用该候选合同，必须使用 Songloft 返回的真实 `song_id`。
 
 禁止创建或使用未经确认的 Downloader action，例如：
 
@@ -133,6 +165,8 @@ POST /api/v1/jsplugin/downloader/api/download
 ```text
 songloft.comm.call('downloader', ...)
 ```
+
+不得假设 Downloader 存在插件间通信能力。
 
 ## Voice Memory 保护
 
@@ -171,6 +205,22 @@ UI 开发不得改变：
 - 定时任务起始位置
 - 跟随上次播放模式
 
+## 播放模式兼容保护
+
+当前运行时真实存在以下五种播放模式：
+
+```text
+order
+loop
+single
+random
+single-once
+```
+
+`single-once` 是当前遗留运行时模式。MIoT V2 的目标核心模式仍为 `order`、`loop`、`single`、`random`。
+
+阶段 1 禁止删除、修改、迁移或隐藏 `single-once`。后续必须通过独立阶段决定保留、迁移或移除，并兼容旧设备配置和定时任务中的既有存储值。不得再声称当前运行时只有四种模式。
+
 ## UI 开发规则
 
 必须：
@@ -190,6 +240,8 @@ UI 开发不得改变：
 - 删除现有功能后重新实现
 - 为视觉效果修改无关后端逻辑
 - 伪造设备“已连接”状态
+
+只有 `presence === 'online'` 时才可以显示“已连接”。设备被选择不等于设备已连接，任何非 `online` 值都不得解释为已连接。当前代码不能可靠表达“连接中”；阶段 1 只能复用当前真实状态能力，不得伪造连接状态。四态设备语义必须放入后续独立阶段。
 
 ## 每个任务的工作流程
 
@@ -239,6 +291,57 @@ git restore .
 - 后端接口
 
 确有必要修改时，必须先说明原因并等待确认。
+
+## 阶段 1 边界
+
+阶段 1 只允许实现：
+
+- `01-base-main.png` 的基础布局
+- `02-playlist-selector.png` 的基础布局
+- Android 竖屏浅色 UI
+- 复用真实设备、歌单和歌曲数据
+- 保留现有 DOM ID 和事件绑定
+- 保留现有设备切换、歌单切换和播放器状态能力
+
+阶段 1 代码文件白名单：
+
+- `static/index.html`
+- `static/css/style.css`
+- `static/js/app.js`，仅确有必要时最小修改
+- `static/js/device.js`，仅确有必要时最小修改
+- `static/js/playlist.js`，仅确有必要时最小修改
+
+阶段 1 禁止：
+
+- 修改 `src/**`
+- 修改后端接口
+- 修改 `VoiceEngine`
+- 修改 `src/memory/**`
+- 修改 `src/voicecmd/**`
+- 修改 `src/player/**`
+- 修改 `package.json`
+- 修改 `package-lock.json`
+- 修改 `plugin.json`
+- 接入 Downloader
+- 接入在线搜索 UI
+- 实现统一搜索
+- 删除、修改、迁移或隐藏 `single-once`
+- 修改 WebSocket 业务逻辑
+- 修改自动切歌
+- 修改下一首预缓存
+- 修改歌词逻辑
+- 实现设备四态模型
+- 修改白名单之外的任何文件
+
+## 后续独立问题
+
+代码审计已发现以下问题，本次只记录，不修复；阶段 1 不得顺便修复。每项以后必须单独审计、修改和回归：
+
+1. `static/js/app.js` 中 Tracely `PLUGIN_VERSION` 仍为 `2026.6.9`。
+2. `auth.js` 验证码请求字段与后端不一致。
+3. `auth.js` 二次验证请求字段与后端不一致。
+4. `muteBtn` 可能重复绑定 `toggleMute()`。
+5. schedule action 验证器与 Executor 支持范围不一致。
 
 ## 完成标准
 

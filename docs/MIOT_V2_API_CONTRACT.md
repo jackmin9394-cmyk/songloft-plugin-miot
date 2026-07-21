@@ -2,11 +2,11 @@
 
 ## 1. 文档目的
 
-本文档记录 MIoT V2 第一版开发中已经确认存在、可以直接复用的接口、字段和调用方式。
+本文档区分 MIoT V2 第一版开发中已经由当前仓库确认的接口与调用协议，以及必须由外部仓库继续审计的候选合同。
 
 本项目必须遵循：
 
-> UI 为能力抽象展示；底层第一版复用 MIoT 已有 search-provider 注册机制和 Downloader 现有 song_id 下载接口，不另造未经确认的接口名称。
+> UI 为能力抽象展示；复用 MIoT 已确认的 search-provider 注册与调用协议。Downloader 仅保留候选外部合同，完成外部仓库审计前不得实施，不另造未经确认的接口名称。
 
 本文档是 MIoT V2 开发的接口基准。
 
@@ -23,9 +23,10 @@
 - MIoT 现有 HTTP 路由
 - MIoT 现有配置字段
 - MIoT 现有 `songloft.comm` 搜索源注册机制
-- MIoT 现有 `/api/search/topone` 规范
+- MIoT 调用 provider topone 的现有协议
 - Songloft 现有远程歌曲导入流程
-- Downloader 现有 `song_id` 下载接口
+
+当前 MIoT 仓库不能独立确认并直接复用 Downloader 的 `entryPath`、HTTP 路由、认证、请求、响应、错误码或页面跳转。相关内容仅作为候选外部合同保留。
 
 ### 2.2 禁止事项
 
@@ -204,7 +205,17 @@ GET /api/v1/jsplugin/miot/search-providers
 GET /search-providers
 ```
 
-### 7.3 预期返回字段
+### 7.3 真实响应外层
+
+```json
+{
+  "providers": []
+}
+```
+
+该接口不使用通用 `success/data` 外层包装。
+
+### 7.4 provider 字段
 
 每个搜索源候选可能包含：
 
@@ -230,7 +241,7 @@ GET /search-providers
 | `active` | 提供方插件是否启用 |
 | `icon` | 可选图标 |
 
-### 7.4 UI 显示规则
+### 7.5 UI 显示规则
 
 只有满足以下条件的 provider，才应作为可用在线能力展示：
 
@@ -238,6 +249,8 @@ GET /search-providers
 installed = true
 active = true
 ```
+
+provider 名称和状态必须动态读取；`installed` 与 `active` 是真实能力显示依据。
 
 没有可用 provider 时：
 
@@ -248,7 +261,7 @@ active = true
 
 ---
 
-## 8. 搜索提供方接口
+## 8. provider topone 调用协议
 
 ### 8.1 接口路径
 
@@ -256,7 +269,9 @@ active = true
 POST /api/search/topone
 ```
 
-这是搜索源插件需要实现的标准搜索路由。
+MIoT 自身不提供该路由，MIoT 是 provider topone 协议的调用方。`/api/search/topone` 是 provider 默认应实现的子路径，不是 MIoT 内部 Router。
+
+当前 MIoT 仓库只能确认调用协议，不能确认每个 provider 已经实际部署该路由。任何实施和测试都必须区分“调用协议已确认”和“外部 provider 路由已部署”。
 
 ### 8.2 请求头
 
@@ -317,6 +332,8 @@ interface SearchOneRequest {
 ## 9. topone 成功响应
 
 ### 9.1 响应结构
+
+每个 provider 当前返回一个 `data` 对象，不是候选数组。
 
 ```json
 {
@@ -514,7 +531,7 @@ song_id
 }
 ```
 
-下载功能不得使用临时 UI 编号或 provider 原始编号。
+如果后续外部仓库审计确认 Downloader 采用 `song_id` 合同，下载功能不得使用临时 UI 编号或 provider 原始编号。
 
 必须使用 Songloft 返回的真实：
 
@@ -522,7 +539,7 @@ song_id
 id
 ```
 
-作为 Downloader 请求中的：
+作为候选 Downloader 请求中的：
 
 ```text
 song_id
@@ -555,29 +572,45 @@ url 是有效 http 或 https 直链
 - 可以在线播放
 - 默认不显示“下载到本地”
 - 需要下载时，应先明确导入 Songloft
-- 获取真实 song_id 后再调用 Downloader
+- Downloader 外部合同验证并确认采用 `song_id` 后，才可使用真实 `song_id` 调用已确认的接口
 
 ---
 
-## 16. Downloader 插件身份
+## 16. 候选外部 Downloader 插件身份
 
-### 16.1 插件名称
+本节及第 17–22 节仅记录供外部仓库审计的候选合同。当前 MIoT 仓库无法独立验证这些内容，验证完成前不得写入 MIoT 正式代码，Downloader 阶段保持阻塞。
+
+### 16.1 候选插件名称
 
 ```text
 歌曲下载
 ```
 
-### 16.2 插件 entryPath
+### 16.2 候选插件 entryPath
 
 ```text
 downloader
 ```
 
+实施前必须从 Downloader 仓库确认真实 `entryPath`，不得仅以本候选值作为开发依据。
+
 ---
 
-## 17. Downloader 当前权限限制
+## 17. Downloader 外部审计要求
 
-Downloader 当前第一版未确认存在：
+实施前必须审计 Downloader 仓库并确认：
+
+- `entryPath`
+- 内部路由
+- 外部完整路径
+- 认证方式
+- 请求结构
+- 响应结构
+- 错误码
+- `installed` / `active` 检测
+- 下载管理页面跳转
+
+当前 MIoT 仓库未确认 Downloader 存在：
 
 ```text
 inter-plugin
@@ -606,28 +639,30 @@ download-song
 
 等未经确认的 action。
 
-第一版必须使用现有 HTTP API。
+不得把候选 HTTP API 描述为当前已经确认并必须使用的接口。只有外部仓库审计通过后，才能决定实际调用方式。
 
 ---
 
-## 18. Downloader 单曲下载接口
+## 18. 候选外部 Downloader 单曲下载合同
 
-### 18.1 接口地址
+### 18.1 候选外部完整路径
 
 ```text
 POST /api/v1/jsplugin/downloader/api/download
 ```
 
-### 18.2 请求头
+该路径必须结合 Downloader 的真实 `entryPath` 和内部 Router 审计验证。
+
+### 18.2 候选请求头
 
 ```http
 Content-Type: application/json
 Authorization: Bearer <plugin-token>
 ```
 
-认证方式继续复用 Songloft 当前插件 HTTP 调用方式。
+认证方式尚未由当前 MIoT 仓库验证，必须在 Downloader 仓库审计中确认。
 
-### 18.3 请求体
+### 18.3 候选请求体
 
 ```json
 {
@@ -643,7 +678,7 @@ interface DownloaderRequest {
 }
 ```
 
-### 18.4 请求前置条件
+### 18.4 验证后的请求前置条件
 
 显示“下载到本地”之前必须同时满足：
 
@@ -655,11 +690,13 @@ downloader active
 
 任意条件不满足时，不调用下载接口。
 
+外部合同验证未完成时，同样不得显示或调用下载接口。
+
 ---
 
-## 19. Downloader 调用流程
+## 19. 候选 Downloader 调用流程
 
-完整调用顺序：
+仅在外部仓库审计确认合同后的候选调用顺序：
 
 ```text
 用户搜索在线歌曲
@@ -691,14 +728,16 @@ downloader active
 
 ---
 
-## 20. MIoT 与 Downloader 的职责边界
+## 20. MIoT 与 Downloader 的候选职责边界
+
+本节描述外部合同验证通过后的目标职责边界，不授权当前阶段实施 Downloader 接入。
 
 ### MIoT 负责
 
 - 展示下载入口
 - 检查 Downloader 状态
 - 获取真实 song_id
-- 调用现有 HTTP 接口
+- 调用审计后确认的 HTTP 接口
 - 显示成功或失败提示
 - 提供“打开下载管理器”入口
 
@@ -718,7 +757,7 @@ MIoT 不维护 Downloader 的任务状态副本。
 
 ---
 
-## 21. 下载确认 UI 字段规则
+## 21. 合同验证后的下载确认 UI 字段规则
 
 下载确认界面只显示当前真实存在的数据。
 
@@ -751,7 +790,7 @@ MIoT 不维护 Downloader 的任务状态副本。
 
 ---
 
-## 22. 下载管理器页面规则
+## 22. 合同验证后的下载管理器页面规则
 
 Downloader 管理页面属于独立 Downloader 插件。
 
@@ -760,6 +799,8 @@ MIoT 可以：
 - 提供跳转入口
 - 显示是否已安装
 - 显示是否 active
+
+以上能力必须在 Downloader 仓库确认 `installed` / `active` 检测方式和真实页面跳转后才可实施。
 
 MIoT 第一版不得重新实现：
 
@@ -781,9 +822,10 @@ MIoT 第一版不得重新实现：
 
 ```text
 order
-random
-single
 loop
+single
+random
+single-once
 ```
 
 UI 映射：
@@ -794,10 +836,11 @@ UI 映射：
 | `loop` | 列表循环 |
 | `single` | 单曲循环 |
 | `random` | 随机播放 |
+| `single-once` | 遗留运行时模式 |
 
-第一版不得自行增加第五种模式。
+`single-once` 已经存在于当前运行时，不是第一版新增的第五种模式。MIoT V2 的目标核心模式仍为 `order`、`loop`、`single`、`random`。
 
-如需增加“播放一次后停止”，必须作为独立业务功能开发，不能只增加一个 UI 图标。
+阶段 1 禁止删除、修改、迁移或隐藏 `single-once`。后续必须通过独立阶段决定保留、迁移或移除，并兼容旧设备配置和定时任务中的既有存储值。
 
 ---
 
@@ -836,6 +879,18 @@ UI 映射：
 }
 ```
 
+只有：
+
+```text
+presence === 'online'
+```
+
+时才可以显示：
+
+```text
+已连接
+```
+
 不得因为：
 
 ```text
@@ -848,7 +903,9 @@ UI 映射：
 已连接
 ```
 
-必须先确认 `presence` 或现有状态逻辑的真实含义。
+设备被选择不等于设备已连接，非 `online` 值不得解释为已连接。
+
+当前代码不能可靠表达“连接中”。阶段 1 只能复用当前真实状态能力，不得伪造连接状态；四态设备语义必须放入后续独立阶段。
 
 无法可靠判断时显示：
 
@@ -887,8 +944,9 @@ MIoT V2 不得修改或破坏：
 - 没有 provider 时 MIoT 可独立工作
 - provider 未安装时不报错
 - provider 未 active 时不报错
-- Downloader 未安装时不报错
-- Downloader 未 active 时不报错
+- Downloader 外部合同未验证时不实施接入
+- 外部合同验证后的实现必须保证 Downloader 未安装时不报错
+- 外部合同验证后的实现必须保证 Downloader 未 active 时不报错
 - 在线搜索失败时本地搜索正常
 - 下载失败时在线播放正常
 - 新 UI 不影响语音命令
@@ -914,9 +972,9 @@ MIoT V2 不得修改或破坏：
 
 ---
 
-## 28. 当前确认清单
+## 28. 当前确认清单与外部待验证合同
 
-当前已经确认：
+### 28.1 当前 MIoT 仓库已经确认
 
 ```text
 MIoT entryPath:
@@ -938,18 +996,30 @@ unregister-search-provider
 GET /api/v1/jsplugin/miot/search-providers
 ```
 
-```text
-搜索提供方接口:
-POST /api/search/topone
+真实响应外层：
+
+```json
+{
+  "providers": []
+}
 ```
 
 ```text
-Downloader entryPath:
+provider topone 调用协议:
+默认子路径 POST /api/search/topone
+MIoT 是调用方，不提供该路由
+每个 provider 返回一个 data 对象
+```
+
+当前仓库不能确认每个 provider 已经实际部署该路由。
+
+### 28.2 候选外部 Downloader 合同，尚未验证
+
+```text
+候选 entryPath:
 downloader
-```
 
-```text
-单曲下载:
+候选单曲下载完整路径:
 POST /api/v1/jsplugin/downloader/api/download
 ```
 
@@ -958,6 +1028,8 @@ POST /api/v1/jsplugin/downloader/api/download
   "song_id": 123
 }
 ```
+
+实施前必须审计 Downloader 仓库，确认 `entryPath`、内部路由、外部完整路径、认证、请求、响应、错误码、`installed` / `active` 检测和页面跳转。验证完成前不得写入 MIoT 正式代码。
 
 ---
 
@@ -988,7 +1060,9 @@ MIoT V2 第一版必须坚持：
 
 > 搜索使用现有 search-provider 和 topone 规范。
 
-> 下载使用 Downloader 现有 song_id HTTP 接口。
+> MIoT 不提供 topone 路由，只调用 provider 默认应实现的协议；外部 provider 是否部署必须另行确认。
+
+> Downloader 的 song_id HTTP 路径和请求体是候选外部合同，必须先审计 Downloader 仓库，验证完成前不得实施。
 
 > Provider 私有数据保持不透明。
 

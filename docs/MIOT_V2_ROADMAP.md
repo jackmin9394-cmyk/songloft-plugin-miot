@@ -87,11 +87,11 @@ MIoT 不负责：
 - 自己写入下载文件或歌曲元数据
 - 在代码中写死具体音乐平台名称
 
-## 4. 已确认的底层接口原则
+## 4. 已确认与待验证的接口原则
 
 项目统一采用以下原则：
 
-> UI 为能力抽象展示；底层第一版复用 MIoT 已有 search-provider 注册机制和 Downloader 现有 song_id 下载接口，不另造未经确认的接口名称。
+> UI 为能力抽象展示；MIoT 仓库内只复用已经确认的 search-provider 注册与调用协议。Downloader 保留为候选外部合同，完成外部仓库审计前不得实施，不另造未经确认的接口名称。
 
 ### 4.1 MIoT 插件标识
 
@@ -117,11 +117,23 @@ unregister-search-provider
 GET /api/v1/jsplugin/miot/search-providers
 ```
 
-### 4.5 搜索提供方接口
+真实响应外层为：
+
+```json
+{
+  "providers": []
+}
+```
+
+该接口不使用通用 `success/data` 外层包装。provider 名称和状态必须动态读取；`installed` 与 `active` 是真实能力显示依据。
+
+### 4.5 provider topone 调用协议
 
 ```text
 POST /api/search/topone
 ```
+
+MIoT 自身不提供该路由，MIoT 是 provider topone 协议的调用方。`/api/search/topone` 是 provider 默认应实现的子路径。当前 MIoT 仓库只能确认调用协议，不能确认每个 provider 已经实际部署对应路由，也不得把该 provider 外部路由描述成 MIoT 内部 Router。
 
 请求体遵循当前 topone 规范：
 
@@ -137,7 +149,7 @@ POST /api/search/topone
 }
 ```
 
-当前统一响应可能包含：
+每个 provider 当前返回一个 `data` 对象，不是候选数组。该对象可能包含：
 
 - title
 - artist
@@ -162,19 +174,21 @@ POST /api/search/topone
 
 MIoT 不得解析 provider 的私有 source_data。
 
-### 4.6 Downloader 插件标识
+### 4.6 Downloader 候选插件标识
 
 ```text
 entryPath: downloader
 ```
 
-### 4.7 Downloader 单曲下载接口
+该 `entryPath` 只是供后续外部仓库审计的候选值，当前 MIoT 仓库无法独立验证。
+
+### 4.7 候选外部 Downloader 单曲下载合同
 
 ```text
 POST /api/v1/jsplugin/downloader/api/download
 ```
 
-请求体：
+候选请求体：
 
 ```json
 {
@@ -182,7 +196,9 @@ POST /api/v1/jsplugin/downloader/api/download
 }
 ```
 
-正确调用流程：
+实施前必须审计 Downloader 仓库，确认 `entryPath`、内部路由、外部完整路径、认证、请求、响应、错误码、`installed` / `active` 检测和页面跳转。验证完成前不得把该候选合同写入 MIoT 正式代码，Downloader 阶段保持阻塞。
+
+验证通过并确认采用该合同后的候选调用流程：
 
 ```text
 在线搜索结果
@@ -238,7 +254,7 @@ MIoT 智能音箱
 顶部左侧改为设备胶囊：
 
 ```text
-Xiaomi Sound Pro  ● 已连接  ▼
+Xiaomi Sound Pro  ● 已连接  ▼（仅 presence === 'online'）
 ```
 
 顶部右侧保留：
@@ -246,14 +262,7 @@ Xiaomi Sound Pro  ● 已连接  ▼
 - 设置
 - 刷新
 
-设备状态：
-
-- 绿色圆点：已连接
-- 红色圆点：离线
-- 橙色圆点：连接中
-- 无法可靠判断时：已选择
-
-不得因为设备已被选择就伪造“已连接”。
+只有 `presence === 'online'` 时才可以显示“已连接”。设备被选择不等于设备已连接，非 `online` 值不得解释为已连接。当前代码不能可靠表达“连接中”；阶段 1 只能复用当前真实状态能力，不得伪造连接状态。四态设备语义放入后续独立阶段。
 
 ### 6.2 当前歌单选择器
 
@@ -344,14 +353,15 @@ Xiaomi Sound Pro  ● 已连接  ▼
 - 音量
 - 播放进度条
 
-第一版仅支持现有真实播放模式：
+当前运行时真实存在五种播放模式：
 
 - order：顺序播放
 - loop：列表循环
 - single：单曲循环
 - random：随机播放
+- single-once：遗留运行时模式
 
-第一版不得只通过增加图标虚构第五种播放模式。
+MIoT V2 的目标核心模式仍为 `order`、`loop`、`single`、`random`。阶段 1 禁止删除、修改、迁移或隐藏 `single-once`。后续必须通过独立阶段决定保留、迁移或移除，并兼容旧设备配置和定时任务中的存储值。
 
 ## 7. 动态能力显示规则
 
@@ -391,6 +401,8 @@ Xiaomi Sound Pro  ● 已连接  ▼
 
 ### 7.3 MIoT 加 Downloader
 
+本节属于 Downloader 外部合同审计通过后的目标能力。审计完成前不实施。
+
 工具箱可以显示：
 
 - Downloader 已安装
@@ -399,6 +411,8 @@ Xiaomi Sound Pro  ● 已连接  ▼
 没有在线候选和真实 song_id 时，不显示无意义的在线下载入口。
 
 ### 7.4 MIoT 加在线搜索源和 Downloader
+
+本节属于 Downloader 外部合同审计通过后的目标能力。审计完成前不实施。
 
 显示完整能力：
 
@@ -413,7 +427,7 @@ Xiaomi Sound Pro  ● 已连接  ▼
 
 ## 8. 在线搜索规则
 
-在线搜索必须复用：
+在线搜索后续必须复用已经确认的注册与调用协议：
 
 ```text
 register-search-provider
@@ -434,6 +448,8 @@ register-search-provider
 
 当前 topone 第一版每个 provider 只保证一条最匹配候选。
 
+MIoT 自身不提供 `/api/search/topone`；它调用 provider 默认应实现的该子路径。当前仓库不能确认每个 provider 已实际部署该路由。每个 provider 当前返回一个 `data` 对象，不是候选数组。
+
 因此第一版 UI 应使用：
 
 ```text
@@ -448,9 +464,24 @@ register-search-provider
 FLAC/MP3 固定列表
 ```
 
-## 9. Downloader 调度规则
+## 9. 候选 Downloader 调度规则
 
-完整下载流程：
+本节是外部合同验证后的候选设计，不是当前 MIoT 仓库已确认的可实施接口。Downloader 阶段在外部仓库审计前保持阻塞。
+
+审计必须确认：
+
+- `entryPath`
+- 内部路由
+- 外部完整路径
+- 认证方式
+- 请求与响应
+- 错误码
+- `installed` / `active` 检测
+- 下载管理页面跳转
+
+验证完成前不得把候选合同写入 MIoT 正式代码，不得假设 `songloft.comm.call('downloader', ...)`，不得虚构 Downloader action。
+
+验证通过后的候选下载流程：
 
 ```text
 用户选中在线结果
@@ -584,14 +615,22 @@ Downloader 未安装或未 active 时：
 
 ### 阶段 1：基础 UI 骨架
 
-- 顶部设备胶囊
-- 紧凑歌单选择器
-- 统一搜索框外观
-- 紧凑歌曲列表
-- 正在播放状态
-- 迷你播放器
+- 实现 `01-base-main.png` 的基础布局
+- 实现 `02-playlist-selector.png` 的基础布局
+- 保持 Android 竖屏浅色 UI
+- 复用真实设备、歌单和歌曲数据
+- 保留现有 DOM ID 和事件绑定
+- 保留现有设备切换、歌单切换和播放器状态能力
 
-本阶段不修改在线搜索和下载业务。
+本阶段代码文件白名单：
+
+- `static/index.html`
+- `static/css/style.css`
+- `static/js/app.js`，仅确有必要时最小修改
+- `static/js/device.js`，仅确有必要时最小修改
+- `static/js/playlist.js`，仅确有必要时最小修改
+
+本阶段禁止修改白名单之外的任何文件，禁止修改 `src/**`、后端接口、VoiceEngine、Voice Memory、WebSocket 业务逻辑、自动切歌、下一首预缓存、歌词逻辑、`package.json`、`package-lock.json` 和 `plugin.json`；禁止接入在线搜索 UI、统一搜索和 Downloader；禁止删除、修改、迁移或隐藏 `single-once`；禁止实现设备四态模型。
 
 ### 阶段 2：设备状态和设备选择
 
@@ -601,6 +640,8 @@ Downloader 未安装或未 active 时：
 - 离线显示
 - 刷新或重连行为
 - 不虚构连接状态
+- 独立审计四态设备语义及可靠状态来源
+- 未确认可靠来源前不显示“连接中”
 
 ### 阶段 3：本地统一搜索
 
@@ -632,22 +673,33 @@ Downloader 未安装或未 active 时：
 
 ### 阶段 6：Downloader 调度
 
+本阶段在 Downloader 外部仓库审计完成前保持阻塞。
+
 - 导入远程歌曲
 - 获取 remote song_id
-- 检测 Downloader
+- 验证 Downloader `entryPath`、路由、认证、请求、响应和错误码
+- 验证 Downloader installed/active 检测与页面跳转
 - 显示下载入口
-- 调用现有 HTTP 接口
+- 仅在验证通过后调用确认的 HTTP 接口
 - 显示任务移交成功提示
 
 ### 阶段 7：播放器优化
 
 - 播放模式选择
-- 四种真实播放模式
+- 保持五种当前运行时播放值可兼容
 - 上一首
 - 播放暂停
 - 下一首
 - 音量
 - 进度条
+
+### 阶段 7A：single-once 独立兼容决策
+
+- 确认保留、迁移或移除策略
+- 目标核心模式仍为 `order`、`loop`、`single`、`random`
+- 兼容旧设备配置中的 `single-once` 存储值
+- 兼容定时任务中的 `single-once` 存储值
+- 未完成独立审计与迁移方案前不得删除、修改、迁移或隐藏 `single-once`
 
 ### 阶段 8：设置页面整理
 
@@ -755,6 +807,8 @@ backup-miot-v2-start-20260721
 
 MIoT V2 第一版完成时必须满足：
 
+本节是全部后续阶段完成后的总体验收，不是阶段 1 当前必过项。阶段 1 只按其基础布局和既有功能回归范围验收。
+
 - 新版 UI 与确认的视觉方向一致
 - 原有设备控制正常
 - 原有账号登录正常
@@ -765,10 +819,12 @@ MIoT V2 第一版完成时必须满足：
 - 有在线 provider 时动态显示在线能力
 - provider 名称不写死
 - provider 错误不影响本地搜索
-- Downloader 未安装时下载入口隐藏
-- Downloader active 后使用真实 song_id
+- Downloader 外部合同已完成独立仓库审计
+- Downloader 未安装时下载入口隐藏（仅在合同验证后的阶段）
+- Downloader active 后使用真实 song_id（仅在合同验证后的阶段）
 - MIoT 不执行文件下载
-- 四种现有播放模式正常
+- 五种当前运行时播放值保持兼容
+- V2 四种目标核心模式正常
 - Voice Memory 正常
 - 语音口令正常
 - 定时任务正常
@@ -811,9 +867,18 @@ backup-miot-v2-start-20260721
 - Voice Memory：已包含在当前基线
 - UI V2：尚未开始修改
 
-## 18. 最终结论
+## 18. 后续独立问题
+
+代码审计已发现以下问题，本次只记录，不修复；阶段 1 不得顺便修复。每项以后必须单独审计、修改和回归：
+
+1. `static/js/app.js` 中 Tracely `PLUGIN_VERSION` 仍为 `2026.6.9`。
+2. `auth.js` 验证码请求字段与后端不一致。
+3. `auth.js` 二次验证请求字段与后端不一致。
+4. `muteBtn` 可能重复绑定 `toggleMute()`。
+5. schedule action 验证器与 Executor 支持范围不一致。
+
+## 19. 最终结论
 
 本项目坚持：
 
-> UI 为能力抽象展示；底层第一版复用 MIoT 已有 search-provider 注册机制和 Downloader 现有 song_id 下载接口，不另造未经确认的接口名称。
-
+> UI 为能力抽象展示；复用 MIoT 已确认的 search-provider 注册与调用协议。Downloader 候选外部合同必须先完成外部仓库审计，验证前不得写入正式代码，不另造未经确认的接口名称。
