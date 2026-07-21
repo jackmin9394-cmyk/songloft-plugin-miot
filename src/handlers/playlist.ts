@@ -452,16 +452,44 @@ export function registerPlaylistHandlers(
 
       const manager = playlistManagerMap.get(account_id, device_id);
       if (!manager) {
-        return jsonResponse({ success: false, error: 'no active playlist for this device' });
+        return jsonResponse({
+          success: false,
+          advanced: false,
+          code: 'empty_playlist',
+          error: '当前歌单为空',
+        });
       }
 
-      const ok = await manager.next();
-      if (!ok) {
-        return jsonResponse({ success: false, error: 'failed to play next' });
+      const result = await manager.nextManual();
+      if (result.success && result.advanced) {
+        return jsonResponse({
+          ...result,
+          data: { message: 'playing next song', current_song: manager.getCurrentSong() },
+        });
       }
-      return jsonResponse({ success: true, data: { message: 'playing next song', current_song: manager.getCurrentSong() } });
+
+      if (result.success) {
+        return jsonResponse({
+          ...result,
+          message: '已经是最后一首',
+          data: { current_song: manager.getCurrentSong() },
+        });
+      }
+
+      const errorMessages: Record<typeof result.code, string> = {
+        empty_playlist: '当前歌单为空',
+        invalid_current_index: '当前歌曲不在歌单中，请重新选择歌曲',
+        device_play_failed: '设备播放失败，请检查设备状态',
+      };
+      return jsonResponse({ ...result, error: errorMessages[result.code] });
     } catch (e: any) {
-      return jsonResponse({ success: false, error: e.message || String(e) });
+      songloft.log.error('[player/next] Manual next failed: ' + String(e));
+      return jsonResponse({
+        success: false,
+        advanced: false,
+        code: 'device_play_failed',
+        error: '设备播放失败，请检查设备状态',
+      });
     }
   });
 

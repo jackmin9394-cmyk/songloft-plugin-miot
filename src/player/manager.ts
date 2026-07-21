@@ -42,6 +42,16 @@ interface PlaylistSongsResponse {
   };
 }
 
+/** HTTP 手动“下一首”的详细结果；旧调用方继续使用 next(): Promise<boolean>。 */
+export type ManualNextResult =
+  | { success: true; advanced: true; code: 'advanced' }
+  | { success: true; advanced: false; code: 'end_of_playlist' }
+  | {
+      success: false;
+      advanced: false;
+      code: 'empty_playlist' | 'invalid_current_index' | 'device_play_failed';
+    };
+
 // ===== PlaylistManager - 单设备播放管理器 =====
 
 /**
@@ -241,6 +251,37 @@ export class PlaylistManager {
       await this.persistState();
     }
     return ok;
+  }
+
+  /**
+   * 用户手动点击“下一首”的详细结果。
+   * 与自动结束链路分开：正常队尾不停止设备，也不取消当前歌曲的结束定时器。
+   */
+  async nextManual(): Promise<ManualNextResult> {
+    if (this.songs.length === 0) {
+      songloft.log.warn('[PlaylistManager] No playlist loaded for manual next');
+      return { success: false, advanced: false, code: 'empty_playlist' };
+    }
+
+    if (this.currentIndex < 0 || this.currentIndex >= this.songs.length) {
+      songloft.log.warn('[PlaylistManager] Invalid current index for manual next: ' + this.currentIndex);
+      return { success: false, advanced: false, code: 'invalid_current_index' };
+    }
+
+    const nextIdx = this.getManualNextIndex();
+    if (nextIdx < 0) {
+      songloft.log.info('[PlaylistManager] Manual next reached end of playlist');
+      return { success: true, advanced: false, code: 'end_of_playlist' };
+    }
+
+    this.currentIndex = nextIdx;
+    const ok = await this.playCurrent();
+    if (!ok) {
+      return { success: false, advanced: false, code: 'device_play_failed' };
+    }
+
+    await this.persistState();
+    return { success: true, advanced: true, code: 'advanced' };
   }
 
   /**
@@ -711,6 +752,30 @@ export class PlaylistManager {
         }
 
         return unplayed[Math.floor(Math.random() * unplayed.length)];
+
+      default:
+        return -1;
+    }
+  }
+
+  /**
+   * 获取用户手动导航的下一首索引。
+   * single 的自动循环仍由 getNextIndex() 处理；single-once 继续落入既有默认结果。
+   */
+  private getManualNextIndex(): number {
+    const len = this.songs.length;
+    if (len === 0) return -1;
+
+    switch (this.playMode) {
+      case 'order':
+      case 'single':
+        return this.currentIndex < len - 1 ? this.currentIndex + 1 : -1;
+
+      case 'loop':
+        return (this.currentIndex + 1) % len;
+
+      case 'random':
+        return this.getNextIndex();
 
       default:
         return -1;

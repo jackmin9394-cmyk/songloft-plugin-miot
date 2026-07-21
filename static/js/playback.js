@@ -252,23 +252,34 @@ export function nextSong() {
         hideLoading();
         showResult(data);
         if (data.success) {
+            if (data.advanced === false && data.code === 'end_of_playlist') {
+                showSnackbar('已经是最后一首', 'info');
+                return;
+            }
+
             showSnackbar('已切换到下一首', 'success');
             if (window.tracely) {
                 window.tracely.reportEvent('song_skip', { direction: 'next', account_id: accountId, device_id: deviceId });
             }
             loadDeviceStatus();
         } else {
-            showSnackbar('切换失败：' + (data.error || data.message || '未知错误'), 'error');
+            const messages = {
+                empty_playlist: '当前歌单为空',
+                invalid_current_index: '当前歌曲不在歌单中，请重新选择歌曲',
+                device_play_failed: '设备播放失败，请检查设备状态'
+            };
+            showSnackbar(messages[data.code] || '切换下一首失败，请稍后重试', 'error');
             if (window.tracely) {
-                window.tracely.reportEvent('api_error', { path: '/player/next', error: data.error || data.message || '未知错误' });
+                window.tracely.reportEvent('api_error', { path: '/player/next', error: data.code || 'unknown_error' });
             }
         }
     }).catch(error => {
         hideLoading();
-        showResult({ error: error.message });
-        showSnackbar('切换失败：' + error.message, 'error');
+        console.warn('切换下一首请求失败', error);
+        showResult({ error: '网络请求失败，请稍后重试' });
+        showSnackbar('网络请求失败，请稍后重试', 'error');
         if (window.tracely) {
-            window.tracely.reportEvent('api_error', { path: '/player/next', error: error.message });
+            window.tracely.reportEvent('api_error', { path: '/player/next', error: 'network_error' });
         }
     });
 }
