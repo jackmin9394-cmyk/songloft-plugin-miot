@@ -100,10 +100,16 @@ function showPage(pageId, options = {}) {
     const isMain = pageId === 'player';
 
     // AppBar 状态切换
+    const appBar = document.querySelector('.miot-v2-app-bar');
     const navBackBtn = document.getElementById('navBackBtn');
     const appBarIcon = document.getElementById('appBarIcon');
     const appBarTitle = document.getElementById('appBarTitle');
     const settingsBtn = document.getElementById('settingsBtn');
+
+    if (appBar) {
+        appBar.classList.toggle('miot-v2-player-active', isMain);
+        appBar.classList.toggle('miot-v2-settings-active', !isMain);
+    }
 
     if (navBackBtn) navBackBtn.style.display = isMain ? 'none' : '';
     if (appBarIcon) appBarIcon.style.display = isMain ? '' : 'none';
@@ -321,6 +327,7 @@ export function stopPlayerStatusPolling() {
 document.addEventListener('DOMContentLoaded', () => {
     // 设置初始历史状态
     history.replaceState({ page: 'player' }, '', '#player');
+    showPage('player');
 
     // 监听浏览器返回/前进
     window.addEventListener('popstate', (event) => {

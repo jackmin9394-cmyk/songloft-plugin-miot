@@ -10,7 +10,7 @@
 </head>
 <body>
     <!-- AppBar -->
-    <header class="app-bar">
+    <header class="app-bar miot-v2-app-bar">
         <button class="btn-icon app-bar-back" id="navBackBtn" style="display:none" title="返回">
             <span class="material-symbols-outlined">arrow_back</span>
         </button>
@@ -24,34 +24,35 @@
         </button>
     </header>
 
-    <!-- Player Toolbar: 歌单选择 + 设备选择 -->
-    <div class="player-toolbar" id="playerToolbar">
-        <div class="playlist-selector" id="playlistSelectorBar" onclick="togglePlaylistSelectPanel(this)">
+    <!-- Player Toolbar: 设备选择 + 歌单选择 -->
+    <div class="player-toolbar miot-v2-player-toolbar" id="playerToolbar">
+        <div class="toolbar-device-selector miot-v2-device-card" id="toolbarDeviceCard" onclick="toggleDeviceSelectPanel(this)">
+            <span class="material-symbols-outlined toolbar-device-icon">speaker</span>
+            <span class="toolbar-device-label" id="toolbarDeviceLabel">设备</span>
+            <span id="currentDeviceStatus"></span>
+            <span class="material-symbols-outlined toolbar-device-arrow">expand_more</span>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="playlist-selector miot-v2-playlist-row" id="playlistSelectorBar" onclick="togglePlaylistSelectPanel(this)">
             <span class="material-symbols-outlined">queue_music</span>
             <span class="playlist-selector-text" id="playlistSelectorText">请选择歌单</span>
             <span class="material-symbols-outlined playlist-selector-arrow">expand_more</span>
         </div>
-        <div class="toolbar-divider"></div>
-        <div class="toolbar-device-selector" id="toolbarDeviceCard" onclick="toggleDeviceSelectPanel(this)">
-            <span class="material-symbols-outlined toolbar-device-icon">speaker</span>
-            <span class="toolbar-device-label" id="toolbarDeviceLabel">设备</span>
-            <span class="material-symbols-outlined toolbar-device-arrow">expand_more</span>
-        </div>
     </div>
 
     <!-- Page: 播放控制 -->
-    <div class="page-content active" id="tab-player">
+    <div class="page-content active miot-v2-player-page" id="tab-player">
         <div class="container">
             <select id="playlistSelect" style="display:none" aria-label="选择歌单"></select>
 
             <!-- 歌曲搜索栏 -->
-            <div class="search-bar" id="songSearchBar" style="display:none">
+            <div class="search-bar miot-v2-song-search" id="songSearchBar" style="display:none">
                 <span class="material-symbols-outlined">search</span>
                 <input type="text" id="songSearchInput" placeholder="搜索歌曲..." autocomplete="off" aria-label="搜索歌曲">
             </div>
 
             <!-- 歌曲列表 -->
-            <div class="song-list" id="songList">
+            <div class="song-list miot-v2-song-list" id="songList">
                 <div class="song-list-empty">请选择歌单</div>
             </div>
         </div>
@@ -101,7 +102,6 @@
                 <select id="deviceSelect" aria-label="选择设备"></select>
                 <span id="currentDeviceName"></span>
                 <span id="currentDeviceAccount"></span>
-                <span id="currentDeviceStatus"></span>
             </div>
 
             <!-- 账号登录卡片 -->
@@ -919,7 +919,7 @@
     </div>
 
     <!-- 固定播放控制栏 -->
-    <div class="player-bar">
+    <div class="player-bar miot-v2-player-bar">
         <div class="player-bar-top">
             <div class="player-bar-top-clickable" onclick="openFullscreenPlayer()">
                 <div class="player-bar-cover-wrap" id="playerBarCoverWrap">
@@ -969,8 +969,8 @@
     </div>
 
     <!-- 歌单选择弹出层 -->
-    <div id="playlistSelectBackdrop" class="popup-backdrop" style="display:none" onclick="closePlaylistSelectPanel()"></div>
-    <div id="playlistSelectPanel" class="popup-panel playlist-select-panel">
+    <div id="playlistSelectBackdrop" class="popup-backdrop miot-v2-playlist-backdrop" style="display:none" onclick="closePlaylistSelectPanel()"></div>
+    <div id="playlistSelectPanel" class="popup-panel playlist-select-panel miot-v2-playlist-panel">
         <div class="search-bar" id="playlistSearchBar">
             <span class="material-symbols-outlined">search</span>
             <input type="text" id="playlistSearchInput" placeholder="搜索歌单..." autocomplete="off" aria-label="搜索歌单">
