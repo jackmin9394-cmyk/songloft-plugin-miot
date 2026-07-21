@@ -12,6 +12,11 @@ import type { MemoryService } from '../memory';
 import { setHostBaseUrl, callHostAPI } from '../utils/http';
 import { setPollDebug } from '../utils/debug';
 import type { SearchPriority } from '../types';
+import {
+  DEFAULT_PROVIDER_SEARCH_PATH,
+  isValidProviderEntryPath,
+  isValidProviderSearchPath,
+} from './search_registry';
 
 const SEARCH_PRIORITIES: SearchPriority[] = ['parallel', 'local_first', 'external_first'];
 
@@ -367,9 +372,8 @@ export function registerConfigHandlers(
     }
   });
 
-  // GET /search-providers - 获取可用的外部搜索提供方列表
-  // 内置 knownProviders（fallback）+ 其他插件经 comm 动态注册的候选，按 entryPath 去重
-  // （注册表优先，可覆盖内置元数据），再做 installed/active 校验。响应结构对前端保持不变。
+  // GET /search-providers - 获取动态注册的外部搜索提供方列表
+  // 注册元数据来自 songloft.storage；installed/active 每次以宿主插件列表为准。
   router.get('/search-providers', async (_req: HTTPRequest) => {
     interface ProviderCandidate {
       entryPath: string;
@@ -378,27 +382,22 @@ export function registerConfigHandlers(
       icon?: string;
     }
 
-    // 内置候选：旧版提供方 / 启动顺序竞态 / miot 尚未收到注册时兜底
-    const knownProviders: ProviderCandidate[] = [
-      { entryPath: 'ytdlp', name: 'yt-dlp', searchPath: '/api/search/topone' },
-      { entryPath: 'bili', name: '哔哩音乐', searchPath: '/api/search/topone' },
-      { entryPath: 'subsonic', name: 'Subsonic', searchPath: '/api/search/topone' },
-    ];
-
-    // 按 entryPath 合并去重：先内置，再用注册表覆盖（注册表优先）
+    // 按 entryPath 防御性去重；无效的历史记录只跳过，不改写持久化注册表。
     const byEntryPath = new Map<string, ProviderCandidate>();
-    for (const p of knownProviders) {
-      byEntryPath.set(p.entryPath, p);
-    }
     try {
       const registered = await configManager.getSearchProviders();
       for (const r of registered) {
-        byEntryPath.set(r.entryPath, {
-          entryPath: r.entryPath,
-          name: r.name || r.entryPath,
-          searchPath: r.searchPath || '/api/search/topone',
-          icon: r.icon,
-        });
+        const entryPath = typeof r.entryPath === 'string' ? r.entryPath.trim() : '';
+        const searchPath = typeof r.searchPath === 'string' && r.searchPath.trim()
+          ? r.searchPath.trim()
+          : DEFAULT_PROVIDER_SEARCH_PATH;
+        if (!isValidProviderEntryPath(entryPath) || !isValidProviderSearchPath(searchPath)) {
+          songloft.log.warn('[config] Ignoring invalid registered search provider metadata: ' + entryPath);
+          continue;
+        }
+        const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim() : entryPath;
+        const icon = typeof r.icon === 'string' && r.icon.trim() ? r.icon.trim() : undefined;
+        byEntryPath.set(entryPath, { entryPath, name, searchPath, icon });
       }
     } catch (e) {
       songloft.log.warn('[config] Failed to load registered search providers: ' + String(e));
@@ -406,25 +405,35 @@ export function registerConfigHandlers(
 
     interface HostPlugin {
       entry_path: string;
-      status: string;
+      status?: unknown;
     }
 
     let installedPlugins: HostPlugin[] = [];
     try {
-      const data = await callHostAPI<{ plugins: HostPlugin[] }>('GET', '/api/v1/jsplugins/');
-      installedPlugins = data.plugins || [];
+      const data = await callHostAPI<{ plugins?: unknown }>('GET', '/api/v1/jsplugins/');
+      if (!data || !Array.isArray(data.plugins)) {
+        throw new Error('invalid plugin list response');
+      }
+      installedPlugins = data.plugins.filter((plugin): plugin is HostPlugin => (
+        !!plugin
+        && typeof plugin === 'object'
+        && typeof (plugin as HostPlugin).entry_path === 'string'
+      ));
     } catch (e) {
       songloft.log.warn('[config] Failed to fetch plugin list: ' + String(e));
+      installedPlugins = [];
     }
 
     const providers = Array.from(byEntryPath.values()).map(p => {
       const found = installedPlugins.find(ip => ip.entry_path === p.entryPath);
       return {
         id: p.entryPath,
+        entryPath: p.entryPath,
         name: p.name,
+        searchPath: p.searchPath,
         url: `/api/v1/jsplugin/${p.entryPath}${p.searchPath}`,
         installed: !!found,
-        active: found?.status === 'active',
+        active: !!found && found.status === 'active',
         ...(p.icon ? { icon: p.icon } : {}),
       };
     });
