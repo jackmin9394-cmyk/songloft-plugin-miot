@@ -4065,6 +4065,186 @@ html.embed .player-bar-cover {
     font-size: 15px;
 }
 
+/* 阶段 3：本地统一搜索结果与当前歌单列表并列，搜索时只切换可见性。 */
+.local-search-results {
+    min-width: 0;
+    padding-bottom: 4px;
+}
+
+.local-search-state {
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 9px;
+    padding: 24px 16px;
+    color: var(--md-on-surface-variant);
+    text-align: center;
+    font-size: 14px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 16px;
+}
+
+.local-search-state .material-symbols-outlined {
+    font-size: 24px;
+}
+
+.local-search-state.error {
+    color: var(--md-error);
+}
+
+.local-search-state .spinner {
+    width: 20px;
+    height: 20px;
+}
+
+.local-search-group + .local-search-group {
+    margin-top: 14px;
+}
+
+.local-search-group-title {
+    margin: 0;
+    padding: 5px 4px 7px;
+    color: var(--md-on-surface);
+    font-size: 15px;
+    font-weight: 700;
+}
+
+.local-search-group-list {
+    min-width: 0;
+    overflow: hidden;
+    background: var(--md-surface);
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 16px;
+}
+
+.local-search-row {
+    width: 100%;
+    min-width: 0;
+    min-height: 66px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    margin: 0;
+    padding: 9px 12px;
+    box-sizing: border-box;
+    border: 0;
+    border-bottom: 1px solid var(--md-outline-variant);
+    border-radius: 0;
+    background: var(--md-surface);
+    color: var(--md-on-surface);
+    font: inherit;
+    text-align: left;
+}
+
+button.local-search-row {
+    cursor: pointer;
+}
+
+button.local-search-row:hover {
+    background: var(--miot-v2-accent-soft);
+}
+
+.local-search-row:last-child {
+    border-bottom: 0;
+}
+
+.local-search-row:disabled {
+    cursor: default;
+    opacity: .62;
+}
+
+.local-search-row:disabled:hover,
+.local-search-info-row:hover {
+    background: var(--md-surface);
+}
+
+.local-search-song-row.active {
+    color: var(--md-primary);
+    background: var(--miot-v2-accent-soft);
+    box-shadow: inset 4px 0 0 var(--md-primary);
+}
+
+.local-search-cover {
+    position: relative;
+    width: 46px;
+    height: 46px;
+    flex: 0 0 46px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border-radius: 11px;
+    background: var(--md-surface-variant);
+    color: var(--md-on-surface-variant);
+}
+
+.local-search-cover img {
+    width: 100%;
+    height: 100%;
+    display: none;
+    object-fit: cover;
+}
+
+.local-search-cover img[src]:not([src=""]) {
+    display: block;
+}
+
+.local-search-cover img[src]:not([src=""]) + .local-search-cover-placeholder {
+    display: none;
+}
+
+.local-search-cover-placeholder {
+    font-size: 23px;
+}
+
+.local-search-row-content {
+    min-width: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.local-search-row-title,
+.local-search-row-subtitle {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.local-search-row-title {
+    color: inherit;
+    font-size: 15px;
+    font-weight: 650;
+}
+
+.local-search-row-subtitle {
+    color: var(--md-on-surface-variant);
+    font-size: 13px;
+}
+
+.local-search-row-trailing {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--md-on-surface-variant);
+}
+
+.local-search-row-trailing .material-symbols-outlined,
+.local-search-row-arrow {
+    flex: 0 0 auto;
+    font-size: 22px;
+    color: var(--md-on-surface-variant);
+}
+
+.local-search-duration {
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+}
+
 .miot-v2-song-list {
     gap: 0;
     overflow: hidden;

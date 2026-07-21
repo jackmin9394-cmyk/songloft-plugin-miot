@@ -29,6 +29,15 @@ const coverObserver = typeof IntersectionObserver !== 'undefined'
     }, { rootMargin: '240px 0px' })
     : null;
 
+function localSearchActions() {
+    return {
+        selectPlaylist,
+        playSong: playLocalSearchSong,
+        loadCover: scheduleCoverLoad,
+        cancelCovers: cancelQueuedCovers,
+    };
+}
+
 /**
  * 用插件 token 认证 fetch 封面资源
  * @param {string} url
@@ -125,7 +134,7 @@ function renderCoverBlob(img, url, blob) {
 function cancelQueuedCovers(container) {
     if (!container) return;
     if (coverObserver) {
-        container.querySelectorAll('.song-item-cover-wrap').forEach(wrap => coverObserver.unobserve(wrap));
+        container.querySelectorAll('.song-item-cover-wrap, .local-search-cover').forEach(wrap => coverObserver.unobserve(wrap));
     }
     for (let i = coverQueue.length - 1; i >= 0; i--) {
         if (container.contains(coverQueue[i].img)) {
@@ -207,6 +216,13 @@ export function closePlaylistSelectPanel() {
  * @param {number} count - 歌曲数量
  */
 export function selectPlaylist(id, name, count) {
+    // 从搜索结果或歌单面板切换歌单时，明确退出本地搜索模式。
+    const songSearchInput = document.getElementById('songSearchInput');
+    if (songSearchInput && songSearchInput.value) {
+        songSearchInput.value = '';
+        songSearchInput.dispatchEvent(new Event('input'));
+    }
+
     // 更新隐藏 select 的值
     const playlistSelect = document.getElementById('playlistSelect');
     if (playlistSelect) playlistSelect.value = id;
@@ -234,6 +250,8 @@ export function selectPlaylist(id, name, count) {
  * @returns {Promise} 歌单加载 Promise
  */
 export function loadPlaylists() {
+    // 搜索框不依赖当前歌单是否加载成功，始终提供本地索引搜索入口。
+    initSongSearch(localSearchActions());
     showLoading();
     return apiGet('/playlists').then(data => {
         hideLoading();
@@ -400,7 +418,7 @@ export function loadPlaylistSongs(playlistId) {
             songList.appendChild(item);
         });
 
-        initSongSearch();
+        initSongSearch(localSearchActions());
 
         // 上报歌单选择事件
         if (window.tracely) {
@@ -430,23 +448,43 @@ export function loadPlaylistSongs(playlistId) {
  * @param {number} index - 歌曲索引
  */
 export function playSongAtIndex(index) {
-    const accountId = getAccountId();
-    if (!accountId) return;
-    const deviceId = getDeviceId();
-    if (!deviceId) return;
-
     const playlistSelect = document.getElementById('playlistSelect');
     const playlistId = playlistSelect ? playlistSelect.value : '';
     if (!playlistId) {
         showSnackbar('请先选择歌单', 'error');
-        return;
+        return Promise.resolve(false);
     }
+
+    return playPlaylistAt(playlistId, index);
+}
+
+/**
+ * 播放本地搜索命中的真实歌曲位置，不修改当前歌单选择器或歌单 DOM 缓存。
+ * @param {Object} song - /indexing/search 返回的歌曲结果
+ * @returns {Promise<boolean>} 是否成功启动播放
+ */
+export function playLocalSearchSong(song) {
+    const playlistId = Number(song?.playlist_id);
+    const songIndex = Number(song?.song_index);
+    if (!Number.isFinite(playlistId) || playlistId <= 0 || !Number.isFinite(songIndex) || songIndex < 0) {
+        showSnackbar('该歌曲当前没有可用的歌单播放位置', 'warning');
+        return Promise.resolve(false);
+    }
+    return playPlaylistAt(playlistId, songIndex);
+}
+
+/** 复用现有 /player/play 入口播放指定歌单位置。 */
+function playPlaylistAt(playlistId, index) {
+    const accountId = getAccountId();
+    if (!accountId) return Promise.resolve(false);
+    const deviceId = getDeviceId();
+    if (!deviceId) return Promise.resolve(false);
 
     const playModeBtn = document.getElementById('playModeBtn');
     const playMode = playModeBtn ? (playModeBtn.getAttribute('data-mode') || 'loop') : 'loop';
 
     showLoading();
-    apiPost('/player/play', {
+    return apiPost('/player/play', {
         account_id: accountId,
         device_id: deviceId,
         playlist_id: parseInt(playlistId),
@@ -457,8 +495,11 @@ export function playSongAtIndex(index) {
         showResult(data);
         if (data.success) {
             showSnackbar('开始播放', 'success');
-            // 高亮当前歌曲
-            highlightSongItem(index);
+            // 当前歌单视图与播放位置一致时才更新其高亮；搜索结果自行按 song_id 高亮。
+            const selectedPlaylistId = document.getElementById('playlistSelect')?.value || '';
+            if (String(selectedPlaylistId) === String(playlistId)) {
+                highlightSongItem(index);
+            }
             if (window.tracely) {
                 window.tracely.reportEvent('song_play', {
                     playlist_id: playlistId,
@@ -467,6 +508,7 @@ export function playSongAtIndex(index) {
                 });
             }
             loadDeviceStatus();
+            return true;
         } else {
             const errMsg = data.error || data.message || '未知错误';
             if (isServerHostError(errMsg)) {
@@ -474,11 +516,13 @@ export function playSongAtIndex(index) {
             } else {
                 showSnackbar('播放失败：' + errMsg, 'error');
             }
+            return false;
         }
     }).catch(error => {
         hideLoading();
         showResult({ error: error.message });
         showSnackbar('播放失败：' + error.message, 'error');
+        return false;
     });
 }
 

@@ -48,8 +48,11 @@
             <!-- 歌曲搜索栏 -->
             <div class="search-bar miot-v2-song-search" id="songSearchBar" style="display:none">
                 <span class="material-symbols-outlined">search</span>
-                <input type="text" id="songSearchInput" placeholder="搜索歌曲..." autocomplete="off" aria-label="搜索歌曲">
+                <input type="text" id="songSearchInput" placeholder="搜索歌曲、歌单、歌手、专辑…" autocomplete="off" aria-label="搜索本地歌曲、歌单、歌手和专辑">
             </div>
+
+            <!-- 本地统一搜索结果；与当前歌单 DOM 分离，避免覆盖歌单缓存。 -->
+            <div class="local-search-results" id="localSearchResults" style="display:none" aria-live="polite"></div>
 
             <!-- 歌曲列表 -->
             <div class="song-list miot-v2-song-list" id="songList">

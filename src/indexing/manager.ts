@@ -13,6 +13,8 @@ export interface IndexedSong {
   title: string;
   artist: string;
   album: string;
+  duration: number;
+  coverUrl: string;
   titleLower: string;   // 归一化匹配键（小写+剥装饰标点），字段名沿用 Lower
   artistLower: string;  // 归一化匹配键
   albumLower: string;   // 归一化匹配键
@@ -36,7 +38,49 @@ export interface IndexedPlaylist {
   id: number;
   name: string;
   nameLower: string;    // 小写化用于搜索
+  namePinyin: string;
   songCount: number;
+  coverUrl: string;
+}
+
+export interface LocalSearchSong {
+  id: number;
+  title: string;
+  artist: string;
+  album: string;
+  duration: number;
+  cover_url: string;
+  playlist_id: number | null;
+  playlist_name: string;
+  song_index: number | null;
+}
+
+export interface LocalSearchPlaylist {
+  id: number;
+  name: string;
+  song_count: number;
+  cover_url: string;
+}
+
+export interface LocalSearchArtist {
+  name: string;
+  song_count: number;
+  album_count: number;
+}
+
+export interface LocalSearchAlbum {
+  name: string;
+  artist: string;
+  song_count: number;
+  cover_url: string;
+}
+
+export interface LocalSearchResults {
+  query: string;
+  songs: LocalSearchSong[];
+  playlists: LocalSearchPlaylist[];
+  artists: LocalSearchArtist[];
+  albums: LocalSearchAlbum[];
 }
 
 /** 歌单内歌曲缓存条目（预建小写字段供搜歌热路径复用，避免逐首 toLowerCase） */
@@ -239,6 +283,9 @@ const FIELD_WEIGHT = { title: 1.0, artist: 0.85, album: 0.7 } as const;
 /** 单 token 参与拼音/编辑距离模糊匹配的最小 rune 长度（单字太短，同音/编辑噪声高） */
 const TOKEN_FUZZY_MIN_LEN = 2;
 
+/** 首次 UI 搜索最多等待后台歌单位置缓存的时间。 */
+const PLAYLIST_CACHE_WAIT_TIMEOUT_MS = 3000;
+
 /** 轻量索引构建分片大小：只做字段整理/小写，批量让出 QuickJS VM。 */
 const LIGHT_INDEX_BATCH_SIZE = 300;
 
@@ -400,6 +447,19 @@ function scoreSongTokens(
   return (weightedSum / tokens.length) * 100;
 }
 
+/** 对单一名称字段评分，供歌单、歌手和专辑分类搜索复用。 */
+function scoreTextTokens(q: QueryTokens, textLower: string, textPinyin: string): number {
+  if (q.tokens.length === 0 || !textLower) return 0;
+
+  let total = 0;
+  for (let i = 0; i < q.tokens.length; i++) {
+    const strength = matchTokenStrength(q.tokens[i], q.pys[i], textLower, textPinyin);
+    if (strength <= 0) return 0;
+    total += strength;
+  }
+  return (total / q.tokens.length) * 100;
+}
+
 /**
  * 索引管理器
  * 从 Songloft 宿主API获取歌曲/歌单数据，建立内存索引，提供模糊搜索
@@ -415,6 +475,8 @@ export class IndexingManager {
   private refreshGeneration: number = 0;
   private lastStandaloneRefreshTime: number = 0;
   private pendingRefreshPromise: Promise<RefreshResult> | null = null;
+  private playlistCacheReady: boolean = false;
+  private pendingPlaylistCachePromise: Promise<void> | null = null;
 
   constructor(configManager?: import('../config/manager').ConfigManager) {
     this.configManager = configManager ?? null;
@@ -435,6 +497,8 @@ export class IndexingManager {
         title,
         artist,
         album,
+        duration: Number(song.duration) || 0,
+        coverUrl: song.cover_url ?? '',
         titleLower: titleNorm,
         artistLower: artistNorm,
         albumLower: albumNorm,
@@ -509,8 +573,15 @@ export class IndexingManager {
     generation: number,
     playlists: IndexedPlaylist[],
   ): void {
-    this.replacePlaylistSongsCacheInBackground(generation, playlists).catch(e => {
+    this.playlistCacheReady = false;
+    const promise = this.replacePlaylistSongsCacheInBackground(generation, playlists);
+    this.pendingPlaylistCachePromise = promise;
+    promise.catch(e => {
       songloft.log.warn(`歌单歌曲缓存后台加载失败: ${e instanceof Error ? e.message : String(e)}`);
+    }).finally(() => {
+      if (this.pendingPlaylistCachePromise === promise) {
+        this.pendingPlaylistCachePromise = null;
+      }
     });
   }
 
@@ -524,6 +595,7 @@ export class IndexingManager {
       return;
     }
     this.playlistSongsCache = cache;
+    this.playlistCacheReady = true;
     songloft.log.info(`歌单歌曲缓存后台加载完成: playlists=${cache.size} pinyinCache=${pinyinCache.size} (${Date.now() - start}ms)`);
   }
 
@@ -570,7 +642,9 @@ export class IndexingManager {
         id: pl.id,
         name: pl.name,
         nameLower: pl.name.toLowerCase(),
+        namePinyin: getCachedPinyin(normalizeForMatch(pl.name)),
         songCount: (pl as any).song_count ?? (pl as any).songCount ?? 0,
+        coverUrl: (pl as any).cover_url ?? '',
       }));
       const newSongs = await this.buildSongIndex(rawSongs);
 
@@ -670,6 +744,177 @@ export class IndexingManager {
 
     scored.sort((a, b) => b.score - a.score);
     return scored.slice(0, MAX_SEARCH_RESULTS).map(s => s.item);
+  }
+
+  /**
+   * 为主页面提供只读的本地统一搜索结果。
+   * 歌曲、歌单、歌手和专辑均来自当前真实 Songloft 索引；歌曲播放位置来自歌单缓存。
+   */
+  async searchLocal(query: string, preferredPlaylistId?: number): Promise<LocalSearchResults> {
+    const trimmed = (query || '').trim();
+    const empty: LocalSearchResults = {
+      query: trimmed,
+      songs: [],
+      playlists: [],
+      artists: [],
+      albums: [],
+    };
+    if (!trimmed) return empty;
+
+    await this.waitForPlaylistCache(PLAYLIST_CACHE_WAIT_TIMEOUT_MS);
+
+    const q = tokenizeQuery(trimmed);
+    if (q.tokens.length === 0) return empty;
+
+    const songs = this.searchSong(trimmed).map(song => {
+      const location = this.findCachedSongLocation(song.id, preferredPlaylistId);
+      return {
+        id: song.id,
+        title: song.title,
+        artist: song.artist,
+        album: song.album,
+        duration: song.duration,
+        cover_url: song.coverUrl,
+        playlist_id: location?.playlistId ?? null,
+        playlist_name: location?.playlistName ?? '',
+        song_index: location?.songIndex ?? null,
+      };
+    });
+
+    const playlists = this.playlists
+      .map(playlist => ({
+        playlist,
+        score: scoreTextTokens(q, normalizeForMatch(playlist.name), playlist.namePinyin),
+      }))
+      .filter(entry => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_SEARCH_RESULTS)
+      .map(({ playlist }) => ({
+        id: playlist.id,
+        name: playlist.name,
+        song_count: playlist.songCount,
+        cover_url: playlist.coverUrl,
+      }));
+
+    const artistMap = new Map<string, {
+      name: string;
+      nameLower: string;
+      namePinyin: string;
+      songIds: Set<number>;
+      albums: Set<string>;
+    }>();
+    const albumMap = new Map<string, {
+      name: string;
+      artist: string;
+      textLower: string;
+      textPinyin: string;
+      songIds: Set<number>;
+      coverUrl: string;
+    }>();
+
+    for (const song of this.songs) {
+      const artistName = (song.artist || '').trim();
+      if (artistName) {
+        const artistKey = normalizeForMatch(artistName);
+        let artist = artistMap.get(artistKey);
+        if (!artist) {
+          artist = {
+            name: artistName,
+            nameLower: artistKey,
+            namePinyin: getCachedPinyin(artistKey),
+            songIds: new Set<number>(),
+            albums: new Set<string>(),
+          };
+          artistMap.set(artistKey, artist);
+        }
+        artist.songIds.add(song.id);
+        if (song.album) artist.albums.add(normalizeForMatch(song.album));
+      }
+
+      const albumName = (song.album || '').trim();
+      if (albumName) {
+        const albumKey = normalizeForMatch(albumName) + '\u0000' + normalizeForMatch(song.artist || '');
+        let album = albumMap.get(albumKey);
+        if (!album) {
+          const combined = normalizeForMatch(albumName + ' ' + (song.artist || ''));
+          album = {
+            name: albumName,
+            artist: song.artist || '',
+            textLower: combined,
+            textPinyin: getCachedPinyin(combined),
+            songIds: new Set<number>(),
+            coverUrl: song.coverUrl,
+          };
+          albumMap.set(albumKey, album);
+        }
+        album.songIds.add(song.id);
+        if (!album.coverUrl && song.coverUrl) album.coverUrl = song.coverUrl;
+      }
+    }
+
+    const artists = Array.from(artistMap.values())
+      .map(artist => ({ artist, score: scoreTextTokens(q, artist.nameLower, artist.namePinyin) }))
+      .filter(entry => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_SEARCH_RESULTS)
+      .map(({ artist }) => ({
+        name: artist.name,
+        song_count: artist.songIds.size,
+        album_count: artist.albums.size,
+      }));
+
+    const albums = Array.from(albumMap.values())
+      .map(album => ({ album, score: scoreTextTokens(q, album.textLower, album.textPinyin) }))
+      .filter(entry => entry.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, MAX_SEARCH_RESULTS)
+      .map(({ album }) => ({
+        name: album.name,
+        artist: album.artist,
+        song_count: album.songIds.size,
+        cover_url: album.coverUrl,
+      }));
+
+    return { query: trimmed, songs, playlists, artists, albums };
+  }
+
+  private findCachedSongLocation(songId: number, preferredPlaylistId?: number): SongLocation | null {
+    const findInPlaylist = (playlistId: number): SongLocation | null => {
+      const songs = this.playlistSongsCache.get(playlistId) ?? [];
+      const songIndex = songs.findIndex(song => song.id === songId);
+      if (songIndex < 0) return null;
+      const playlist = this.playlists.find(item => item.id === playlistId);
+      const song = songs[songIndex];
+      return {
+        songId,
+        playlistId,
+        playlistName: playlist?.name ?? '',
+        songIndex,
+        songTitle: song.title,
+        artist: song.artist,
+      };
+    };
+
+    if (preferredPlaylistId) {
+      const preferred = findInPlaylist(preferredPlaylistId);
+      if (preferred) return preferred;
+    }
+
+    for (const playlist of this.playlists) {
+      if (playlist.id === preferredPlaylistId) continue;
+      const location = findInPlaylist(playlist.id);
+      if (location) return location;
+    }
+    return null;
+  }
+
+  private async waitForPlaylistCache(timeoutMs: number): Promise<boolean> {
+    if (this.playlistCacheReady) return true;
+    const deadline = Date.now() + Math.max(0, timeoutMs);
+    while (!this.playlistCacheReady && this.pendingPlaylistCachePromise && Date.now() < deadline) {
+      await sleep(Math.min(100, Math.max(1, deadline - Date.now())));
+    }
+    return this.playlistCacheReady;
   }
 
   /**
@@ -897,7 +1142,7 @@ export class IndexingManager {
    *   歌单缓存尚未加载则跳过（后台加载会从服务端拉到已追加的完整列表）。
    */
   addImportedSong(
-    song: { id: number; title: string; artist?: string; album?: string },
+    song: { id: number; title: string; artist?: string; album?: string; duration?: number; cover_url?: string },
     playlistId?: number,
   ): void {
     const title = song.title ?? '';
@@ -913,6 +1158,8 @@ export class IndexingManager {
     const entry: IndexedSong = {
       id: song.id,
       title, artist, album,
+      duration: Number(song.duration) || 0,
+      coverUrl: song.cover_url ?? '',
       titleLower, artistLower, albumLower,
       titlePinyin, artistPinyin, albumPinyin,
     };
