@@ -3868,9 +3868,11 @@ html.embed .player-bar-cover {
 /* ============================================ */
 
 :root {
-    --miot-v2-app-bar-height: 60px;
-    --miot-v2-toolbar-height: 70px;
-    --miot-v2-page-top: 142px;
+    --miot-v2-app-bar-height: 56px;
+    --miot-v2-toolbar-height: 56px;
+    --miot-v2-page-top: 120px;
+    --miot-v2-player-bar-safe-height: 118px;
+    --miot-v2-snackbar-gap: 8px;
     --miot-v2-accent-soft: color-mix(in srgb, var(--md-primary) 9%, var(--md-surface));
 }
 
@@ -3945,7 +3947,7 @@ html.embed .player-bar-cover {
     top: var(--miot-v2-app-bar-height);
     height: var(--miot-v2-toolbar-height);
     z-index: 101;
-    padding: 10px 16px;
+    padding: 4px 16px;
     align-items: stretch;
     justify-content: center;
     background: var(--md-surface);
@@ -3959,7 +3961,7 @@ html.embed .player-bar-cover {
 
 .miot-v2-device-card {
     position: fixed;
-    top: 10px;
+    top: 8px;
     left: 16px;
     right: 112px;
     z-index: 102;
@@ -4010,8 +4012,8 @@ html.embed .player-bar-cover {
     flex: 1 1 100%;
     width: 100%;
     min-width: 0;
-    height: 50px;
-    min-height: 50px;
+    height: 48px;
+    min-height: 48px;
     padding: 0 15px;
     gap: 12px;
     box-sizing: border-box;
@@ -4037,16 +4039,17 @@ html.embed .player-bar-cover {
 
 #tab-player.miot-v2-player-page {
     padding-top: var(--miot-v2-page-top);
+    padding-bottom: 140px;
     background: var(--md-surface);
 }
 
 #tab-player.miot-v2-player-page > .container {
-    gap: 12px;
+    gap: 8px;
 }
 
 #songSearchBar.miot-v2-song-search {
     margin: 0;
-    min-height: 50px;
+    min-height: 48px;
     padding: 0 15px;
     gap: 10px;
     background: var(--md-surface);
@@ -4125,16 +4128,20 @@ html.embed .player-bar-cover {
     left: max(8px, env(safe-area-inset-left, 0px));
     right: max(8px, env(safe-area-inset-right, 0px));
     bottom: max(8px, env(safe-area-inset-bottom, 0px));
-    padding: 8px 12px;
+    padding: 6px 12px;
     border: 1px solid var(--md-outline-variant);
     border-radius: 18px;
     box-shadow: 0 -2px 18px rgba(38, 40, 65, .12);
 }
 
 .miot-v2-player-bar .player-bar-cover-wrap {
-    width: 44px;
-    height: 44px;
+    width: 40px;
+    height: 40px;
     border-radius: 10px;
+}
+
+.miot-v2-player-bar .player-bar-top {
+    margin-bottom: 0;
 }
 
 .miot-v2-player-bar .player-bar-info {
@@ -4151,8 +4158,37 @@ html.embed .player-bar-cover {
     text-align: left;
 }
 
+.miot-v2-player-bar .progress-bar-container,
+.miot-v2-player-bar .playback-controls {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+.miot-v2-player-bar .playback-controls .btn-icon,
+.miot-v2-player-bar .playback-controls .play-btn {
+    width: 44px;
+    height: 44px;
+}
+
 .miot-v2-player-bar .progress-fill {
     background: linear-gradient(90deg, var(--md-primary), color-mix(in srgb, var(--md-primary) 72%, #7d75ff));
+}
+
+/* 播放页提示固定在迷你播放器上方；设置页没有播放器，保留贴近底部的提示。 */
+#snackbar.snackbar {
+    z-index: 190;
+}
+
+#tab-player.active ~ #snackbar {
+    bottom: calc(
+        max(8px, env(safe-area-inset-bottom, 0px))
+        + var(--miot-v2-player-bar-safe-height)
+        + var(--miot-v2-snackbar-gap)
+    );
+}
+
+#tab-settings.active ~ #snackbar {
+    bottom: max(24px, env(safe-area-inset-bottom, 0px));
 }
 
 #playlistSelectBackdrop.miot-v2-playlist-backdrop {
@@ -4218,8 +4254,8 @@ html.embed .player-bar-cover {
 
 @media (max-width: 600px) {
     :root {
-        --miot-v2-toolbar-height: 66px;
-        --miot-v2-page-top: 138px;
+        --miot-v2-toolbar-height: 56px;
+        --miot-v2-page-top: 120px;
     }
 
     .miot-v2-app-bar {
@@ -4231,7 +4267,7 @@ html.embed .player-bar-cover {
     }
 
     .miot-v2-player-toolbar {
-        padding: 8px 12px;
+        padding: 4px 12px;
     }
 
     .miot-v2-device-card {
@@ -4275,14 +4311,14 @@ html.embed .player-bar-cover {
 
 html.embed {
     --miot-v2-app-bar-height: 44px;
-    --miot-v2-toolbar-height: 62px;
-    --miot-v2-page-top: 114px;
+    --miot-v2-toolbar-height: 54px;
+    --miot-v2-page-top: 104px;
 }
 
 html.embed .miot-v2-player-toolbar {
     height: var(--miot-v2-toolbar-height) !important;
-    padding-top: 8px;
-    padding-bottom: 8px;
+    padding-top: 4px;
+    padding-bottom: 4px;
 }
 
 html.embed .miot-v2-device-card {
@@ -4301,12 +4337,24 @@ html.embed .miot-v2-playlist-row {
 
 html.embed #tab-player.miot-v2-player-page {
     padding-top: var(--miot-v2-page-top) !important;
-    padding-bottom: 160px !important;
+    padding-bottom: 140px !important;
 }
 
 html.embed .miot-v2-player-bar {
     left: 8px !important;
     right: 8px !important;
     bottom: 8px !important;
-    padding-bottom: 8px !important;
+    padding-bottom: 6px !important;
+}
+
+html.embed #tab-player.active ~ #snackbar {
+    bottom: calc(
+        max(8px, env(safe-area-inset-bottom, 0px))
+        + var(--miot-v2-player-bar-safe-height)
+        + var(--miot-v2-snackbar-gap)
+    ) !important;
+}
+
+html.embed #tab-settings.active ~ #snackbar {
+    bottom: max(24px, env(safe-area-inset-bottom, 0px)) !important;
 }
