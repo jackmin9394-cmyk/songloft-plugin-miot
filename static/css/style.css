@@ -922,6 +922,16 @@ html[data-theme="dark"] {
     background: var(--md-outline);
 }
 
+.current-device-status.unknown {
+    color: var(--md-on-surface-variant);
+}
+
+.current-device-status.unknown::before {
+    box-sizing: border-box;
+    background: transparent;
+    border: 1px solid var(--md-outline);
+}
+
 .current-device .arrow-icon {
     color: var(--md-on-surface-variant);
     flex-shrink: 0;
@@ -1196,6 +1206,15 @@ html[data-theme="dark"] {
 
 .device-item-status.offline {
     background: var(--md-outline);
+}
+
+.device-item .device-status.online {
+    color: var(--md-success);
+}
+
+.device-item .device-status.offline,
+.device-item .device-status.unknown {
+    color: var(--md-on-surface-variant);
 }
 
 /* Auth Tabs */
@@ -1970,6 +1989,12 @@ html[data-theme="dark"] {
 
 .device-select-item .device-select-status.offline {
     background: var(--md-outline);
+}
+
+.device-select-item .device-select-status.unknown {
+    box-sizing: border-box;
+    background: transparent;
+    border: 1px solid var(--md-outline);
 }
 
 .device-select-item .check-icon {

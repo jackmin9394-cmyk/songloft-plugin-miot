@@ -11,6 +11,28 @@ import { closePlayModePanel, closeVolumePanel, initializePlaybackControls, syncV
 let allAccountDevices = [];
 
 /**
+ * 将后端设备状态收敛为 UI 可展示的真实三态。
+ * @param {*} presence - 原始设备状态
+ * @returns {'online'|'offline'|'unknown'} 归一化状态
+ */
+function normalizeDevicePresence(presence) {
+    if (presence === 'online') return 'online';
+    if (presence === 'offline') return 'offline';
+    return 'unknown';
+}
+
+/**
+ * 获取设备状态的 class 和中文文案。
+ * @param {*} presence - 原始设备状态
+ * @returns {{status: 'online'|'offline'|'unknown', text: string}} 展示信息
+ */
+function getDevicePresencePresentation(presence) {
+    const status = normalizeDevicePresence(presence);
+    const text = status === 'online' ? '在线' : status === 'offline' ? '离线' : '状态未知';
+    return { status, text };
+}
+
+/**
  * 获取缓存的所有账号设备数据
  * @returns {Array} 设备数据数组
  */
@@ -44,8 +66,8 @@ export function updateDeviceSelect(accountId, autoSelect = true) {
         const option = document.createElement('option');
         option.value = device.deviceID;
         const modelInfo = device.hardware || device.model || '未知型号';
-        const statusText = device.presence === 'online' ? '[在线]' : '[离线]';
-        option.textContent = (device.name || device.alias || '未命名') + ' [' + modelInfo + '] ' + statusText;
+        const presence = getDevicePresencePresentation(device.presence);
+        option.textContent = (device.name || device.alias || '未命名') + ' [' + modelInfo + '] [' + presence.text + ']';
         select.appendChild(option);
     });
 
@@ -139,7 +161,13 @@ export function loadDevices(isInitialLoad = false) {
             // 设备列表刷新后，根据后端返回的最新 volume 同步音量 UI
             // 覆盖以下场景：1) 初始加载自动恢复设备 2) AppBar 刷新按钮 3) 已有选中设备时的列表刷新
             if (window.currentAccountId && window.currentDeviceId) {
+                updateCurrentDeviceCard(window.currentAccountId, window.currentDeviceId);
                 syncVolumeFromDevice();
+            }
+
+            const deviceSelectPanel = document.getElementById('deviceSelectPanel');
+            if (deviceSelectPanel && deviceSelectPanel.classList.contains('show')) {
+                renderDeviceSelectList();
             }
 
             showResult(data);
@@ -237,13 +265,9 @@ export function updateCurrentDeviceCard(accountId, deviceId) {
     }
 
     if (deviceStatusEl) {
-        if (device.presence === 'online') {
-            deviceStatusEl.textContent = '在线';
-            deviceStatusEl.className = 'current-device-status online';
-        } else {
-            deviceStatusEl.textContent = '离线';
-            deviceStatusEl.className = 'current-device-status offline';
-        }
+        const presence = getDevicePresencePresentation(device.presence);
+        deviceStatusEl.textContent = presence.text;
+        deviceStatusEl.className = 'current-device-status ' + presence.status;
     }
 
     // 更新工具栏设备标签
@@ -384,7 +408,7 @@ function renderDeviceSelectList() {
 
         managedDevices.forEach(device => {
             const isActive = accountData.account_id === currentAccountId && device.deviceID === currentDeviceId;
-            const statusClass = device.presence === 'online' ? 'online' : 'offline';
+            const statusClass = normalizeDevicePresence(device.presence);
             html += `
                 <div class="device-select-item ${isActive ? 'active' : ''}"
                      onclick="selectDevice('${escapeHtml(accountData.account_id)}', '${escapeHtml(device.deviceID)}')">

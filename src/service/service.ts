@@ -30,6 +30,13 @@ export interface DeviceInfo {
   last_selected_at: string;
 }
 
+/** 仅保留小米明确返回的在线/离线状态，其余情况统一视为未知。 */
+function normalizeDevicePresence(presence: unknown): string {
+  if (presence === 'online') return 'online';
+  if (presence === 'offline') return 'offline';
+  return 'unknown';
+}
+
 // ===== 服务实现 =====
 
 /**
@@ -441,7 +448,7 @@ export class MinaService {
       model: dev.model,
       hardware: dev.hardware,
       alias: dev.alias,
-      presence: 'offline', // 无法获取在线状态时默认 offline
+      presence: 'unknown', // 本地缓存不包含可验证的在线状态
       managed: dev.managed,
       volume: dev.volume,
       play_mode: dev.play_mode,
@@ -471,7 +478,7 @@ export class MinaService {
         model: apiDev.model || '',
         hardware: apiDev.hardware || '',
         alias: apiDev.alias || '',
-        presence: apiDev.presence || 'offline',
+        presence: normalizeDevicePresence(apiDev.presence),
         managed: local?.managed ?? false,
         volume: local?.volume ?? 0,
         play_mode: local?.play_mode ?? 'order',

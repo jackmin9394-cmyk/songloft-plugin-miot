@@ -402,7 +402,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const refreshBtn = document.getElementById('refreshBtn');
     if (refreshBtn) {
         refreshBtn.addEventListener('click', () => {
-            loadDevices(true);
+            loadDevices(false);
             loadPlaylists();
             // 同时刷新歌曲/歌单索引
             SongloftPlugin.apiPost('/indexing/refresh', {}).catch(() => {});

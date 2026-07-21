@@ -215,6 +215,17 @@ function loadAccountDevices(accountId, devicesData) {
 }
 
 /**
+ * 将设备状态转换为账号管理页使用的真实三态。
+ * @param {*} presence - 原始设备状态
+ * @returns {{status: 'online'|'offline'|'unknown', text: string}} 展示信息
+ */
+function getDevicePresencePresentation(presence) {
+    if (presence === 'online') return { status: 'online', text: '在线' };
+    if (presence === 'offline') return { status: 'offline', text: '离线' };
+    return { status: 'unknown', text: '状态未知' };
+}
+
+/**
  * 渲染单个设备项（MD3 风格）
  * @param {string} accountId - 账号 ID
  * @param {Object} device - 设备信息对象
@@ -224,8 +235,7 @@ function renderDeviceItem(accountId, device) {
     const isChecked = device.managed ? 'checked' : '';
     const deviceName = escapeHtml(device.name || device.alias || '未命名设备');
     const deviceModel = escapeHtml(device.hardware || device.model || '未知型号');
-    const statusClass = device.presence === 'online' ? 'online' : 'offline';
-    const statusText = device.presence === 'online' ? '在线' : '离线';
+    const presence = getDevicePresencePresentation(device.presence);
 
     return `
         <label class="device-item">
@@ -235,7 +245,7 @@ function renderDeviceItem(accountId, device) {
                 <div class="device-item-name">${deviceName}</div>
                 <div class="device-item-meta">
                     <span>${deviceModel}</span>
-                    <span class="device-status ${statusClass}">${statusText}</span>
+                    <span class="device-status ${presence.status}">${presence.text}</span>
                 </div>
             </div>
         </label>
