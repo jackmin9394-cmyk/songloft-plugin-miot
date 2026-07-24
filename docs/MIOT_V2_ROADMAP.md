@@ -669,6 +669,9 @@ Downloader 未安装或未 active 时：
 - provider 中立结果展示
 - 当前来源选择
 - 在线播放
+- 不入库直链优先通过 Core Media Proxy V1 创建临时、可 Range 播放的音箱 URL
+- Core 不可用时保留原始直链兼容回退
+- session 管理走本地宿主 API，音箱播放 URL 必须使用非 loopback `server_host`
 - 不虚构音质和格式字段
 
 ### 阶段 6：Downloader 调度

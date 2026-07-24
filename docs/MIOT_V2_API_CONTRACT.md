@@ -574,6 +574,45 @@ url 是有效 http 或 https 直链
 - 需要下载时，应先明确导入 Songloft
 - Downloader 外部合同验证并确认采用 `song_id` 后，才可使用真实 `song_id` 调用已确认的接口
 
+### 15.1 Core Media Proxy V1
+
+当前 Core 仓库已经确认以下合同：
+
+```text
+POST /api/v1/media-proxy/sessions
+```
+
+该管理端点需要 Bearer 认证，请求只包含 provider 返回的公开直链、
+可选媒体时长和设备 ID：
+
+```json
+{
+  "url": "https://cdn.example.com/audio",
+  "duration": 253,
+  "device_id": "optional-device-id"
+}
+```
+
+成功响应包含 opaque token、公开播放 path、idle expiry 和 hard expiry。
+MIoT 不记录或显示 token，也不把上游 URL、签名 query 或认证响应写入日志。
+
+不入库直链播放按以下顺序执行：
+
+```text
+provider 直链
+→ MIoT 通过本地宿主 API 创建 Media Proxy session
+→ 使用已配置且非 loopback 的 server_host 拼接 Core 返回 path
+→ 把无需 JWT 的临时代理 URL 投放给音箱
+```
+
+Core 不支持 Media Proxy V1、session 创建失败、响应结构无效或
+`server_host` 不可被音箱访问时，MIoT 保留原始直链作为兼容回退。
+兼容回退不改变 provider 中立、`source_data` 不透明或 Downloader 阻塞规则。
+
+不得使用 `songloft.plugin.getHostUrl()` 返回的插件本地地址构造音箱播放 URL；
+该地址只用于 MIoT 在服务端调用受认证的 session 管理端点。音箱播放 URL
+必须使用用户配置的 `server_host`。
+
 ---
 
 ## 16. 候选外部 Downloader 插件身份

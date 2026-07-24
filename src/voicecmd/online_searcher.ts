@@ -10,6 +10,10 @@ import { ConfigManager } from '../config/manager';
 import { IndexingManager } from '../indexing/manager';
 import type { ExternalSearchSource, PlayMode } from '../types';
 import type { PlaylistManager } from '../player/manager';
+import {
+  createMediaProxyPlaybackURL,
+  mediaProxyFailureCode,
+} from '../media_proxy/client';
 
 // 外部搜索 API 请求体
 interface SearchOneRequest {
@@ -248,16 +252,33 @@ export class OnlineSearcher {
     if (config.external_search_no_import) {
       if (isDirectLink) {
         const songName = song.artist ? `${song.title}-${song.artist}` : song.title;
-        songloft.log.info('[OnlineSearcher] [Diag] No-import direct push: songName="' + songName + '" url="' + directUrl + '"');
-        const played = await minaService.playURL(accountId, deviceId, directUrl, {
+        let playbackURL = directUrl;
+        let playbackTransport = 'direct_compatibility_fallback';
+        try {
+          playbackURL = await createMediaProxyPlaybackURL(directUrl, {
+            duration: song.duration,
+            deviceId,
+          });
+          playbackTransport = 'core_media_proxy_v1';
+        } catch (error) {
+          songloft.log.warn(
+            '[OnlineSearcher] Media Proxy unavailable; using direct compatibility fallback'
+            + ' reason=' + mediaProxyFailureCode(error),
+          );
+        }
+        songloft.log.info(
+          '[OnlineSearcher] [Diag] No-import direct push: songName="' + songName
+          + '" hasUrl=true transport=' + playbackTransport,
+        );
+        const played = await minaService.playURL(accountId, deviceId, playbackURL, {
           title: song.title,
           artist: song.artist,
         });
         if (!played) {
-          songloft.log.error('[OnlineSearcher] No-import: failed to push URL to device: ' + directUrl);
+          songloft.log.error('[OnlineSearcher] No-import: failed to push URL to device; hasUrl=true');
           return false;
         }
-        songloft.log.info('[OnlineSearcher] Playing online song (no-import): ' + song.title + ' - ' + song.artist + ' url=' + directUrl);
+        songloft.log.info('[OnlineSearcher] Playing online song (no-import): ' + song.title + ' - ' + song.artist + ' hasUrl=true');
         return true;
       }
       songloft.log.info('[OnlineSearcher] No-import enabled but result is resolution-type (no direct url), falling back to import: ' + song.title);
@@ -324,13 +345,16 @@ export class OnlineSearcher {
 
     // 推送 URL 到音箱（传「歌名-歌手」供触屏歌词模式匹配曲库）
     const songName = song.artist ? `${song.title}-${song.artist}` : song.title;
-    songloft.log.info('[OnlineSearcher] [Diag] Push to device: songName="' + songName + '" importedUrl="' + imported.url + '" playUrl="' + playUrl + '"');
+    songloft.log.info(
+      '[OnlineSearcher] [Diag] Push to device: songName="' + songName
+      + '" hasImportedUrl=' + !!imported.url + ' hasPlayUrl=true',
+    );
     const played = await minaService.playURL(accountId, deviceId, playUrl, {
       title: song.title,
       artist: song.artist,
     });
     if (!played) {
-      songloft.log.error('[OnlineSearcher] Failed to push URL to device: ' + playUrl);
+      songloft.log.error('[OnlineSearcher] Failed to push URL to device; hasPlayUrl=true');
       return false;
     }
 
@@ -342,7 +366,10 @@ export class OnlineSearcher {
       );
     }
 
-    songloft.log.info('[OnlineSearcher] Playing online song: ' + song.title + ' - ' + song.artist + ' url=' + playUrl);
+    songloft.log.info(
+      '[OnlineSearcher] Playing online song: ' + song.title + ' - ' + song.artist
+      + ' hasPlayUrl=true',
+    );
     return true;
   }
 

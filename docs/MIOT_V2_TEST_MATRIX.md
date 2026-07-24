@@ -160,6 +160,12 @@
 - [ ] 单个 provider 超时或失败不影响本地结果及其他 provider
 - [ ] 不解析 provider 私有 `source_data`
 - [ ] 不显示虚构的格式、码率和音质
+- [ ] 不入库直链通过认证的 `POST /api/v1/media-proxy/sessions` 创建临时会话
+- [ ] 音箱 URL 使用非 loopback `server_host` 与 Core 返回的 opaque path
+- [ ] session token、上游 URL、签名 query 和宿主响应不进入日志
+- [ ] session 创建失败或旧 Core 不支持时安全回退原始直链
+- [ ] base path 部署不会重复或丢失路径前缀
+- [ ] `npm run test:media-proxy` 通过
 
 ### 4.3 设备四态语义
 
