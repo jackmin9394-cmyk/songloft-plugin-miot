@@ -13,7 +13,7 @@ import { URLBuilder } from '../player/url_builder';
 import { AIAnalyzer } from './ai_analyzer';
 import { OnlineSearcher } from './online_searcher';
 import { updateDeviceStatusCache } from '../handlers/playlist';
-import { MemoryService } from '../memory';
+import { MemoryService, selectPreferredLocalSong } from '../memory';
 import type { PlaylistManager } from '../player/manager';
 import type { SongLocation } from '../indexing/manager';
 import type { MemoryRecord } from '../memory';
@@ -399,6 +399,20 @@ export class VoiceEngine {
     const songName = record.songName || query;
     const searchTerm = record.artist ? `${songName} ${record.artist}` : songName;
 
+    const preferredLocal = await this.findPreferredLocalMemorySong(record, searchTerm);
+    if (preferredLocal) {
+      const pm = await this.prepareMemoryPlayback(accountId, deviceId);
+      const played = await this.playStandaloneSong(preferredLocal, pm, accountId, deviceId);
+      if (played) {
+        songloft.log.info(`[VoiceMemoryV3] local_preferred songId=${preferredLocal.id}`);
+        return {
+          songId: preferredLocal.id,
+          songName: preferredLocal.title,
+          artist: preferredLocal.artist,
+        };
+      }
+    }
+
     if (typeof record.playlistId === 'number' && typeof record.songIndex === 'number') {
       const pm = await this.prepareMemoryPlayback(accountId, deviceId);
       const loc: SongLocation = {
@@ -448,6 +462,28 @@ export class VoiceEngine {
 
     songloft.log.warn(`[VoiceMemory] error fallback: record has no playable id id=${record.id}`);
     return null;
+  }
+
+  private async findPreferredLocalMemorySong(
+    record: MemoryRecord,
+    searchTerm: string,
+  ): Promise<StandaloneSongCandidate | null> {
+    try {
+      if (typeof record.songId === 'number') {
+        const remembered = await songloft.songs.getById(record.songId);
+        if (remembered?.type === 'local') return null;
+      }
+      const results = await this.indexingManager.searchLocal(searchTerm);
+      return await selectPreferredLocalSong(
+        record,
+        results.songs,
+        async id => await songloft.songs.getById(id),
+      );
+    } catch (error) {
+      songloft.log.warn('[VoiceMemoryV3] local preference fallback name='
+        + (error instanceof Error ? error.name : 'Error'));
+      return null;
+    }
   }
 
   private queueMemorySuccess(query: string, song: PlayedSong, matchedRecordId?: string, memoryHitReason?: string): void {
