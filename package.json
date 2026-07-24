@@ -7,6 +7,8 @@
     "prebuild": "node scripts/fetch-holidays.mjs && node scripts/build-pinyin-data.mjs",
     "build": "songloft-plugin build",
     "test:media-proxy": "node scripts/run-media-proxy-tests.mjs",
+    "test:external-playback": "node scripts/run-external-playback-tests.mjs",
+    "test:test-command": "node scripts/run-test-command-tests.mjs",
     "predev": "node scripts/fetch-holidays.mjs && node scripts/build-pinyin-data.mjs",
     "dev": "songloft-plugin dev",
     "validate": "songloft-plugin validate",

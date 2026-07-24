@@ -294,6 +294,8 @@ export type PlayMode = 'order' | 'random' | 'single' | 'loop';
 /** 播放器状态 */
 export interface PlayerStatus {
   state: PlayState;
+  /** 当前状态由歌单状态机还是独立/外部 URL 播放产生。旧客户端可忽略。 */
+  playback_source?: 'playlist' | 'external';
   play_mode: PlayMode;
   playlist_id: number;
   current_index: number;

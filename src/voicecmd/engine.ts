@@ -34,6 +34,8 @@ interface StandaloneSongCandidate {
   url: string;
   title: string;
   artist: string;
+  duration?: number;
+  cover_url?: string;
 }
 
 interface PlayedSong {
@@ -43,6 +45,11 @@ interface PlayedSong {
   playlistId?: number;
   playlistName?: string;
   songIndex?: number;
+}
+
+interface CommandExecutionResult {
+  executed: boolean;
+  playedSong: PlayedSong | null;
 }
 
 type SongSearchCandidate =
@@ -271,7 +278,7 @@ export class VoiceEngine {
       songloft.log.info(`[VoiceEngine] [Rule] → Matched search: type=${result.command.type} keyword="${result.keyword}" argument="${result.argument}"`);
 
       // 执行口令
-      const playedSong = await this.executeCommand(result, accountId, msg.device_id);
+      const { playedSong } = await this.executeCommand(result, accountId, msg.device_id);
       if (memoryEnabled && result.command.type === 'play_song' && playedSong) {
         this.queueMemorySuccess(query, playedSong);
       }
@@ -289,7 +296,7 @@ export class VoiceEngine {
         songloft.log.info(`[VoiceEngine] [AI] Done: action=${aiResult.action} confidence=${aiResult.confidence} params=${JSON.stringify(aiResult.params)}`);
         if (aiResult.confidence !== 'low' && aiResult.action !== 'unknown') {
           songloft.log.info(`[VoiceEngine] [AI] → Executing fallback (high confidence, action=${aiResult.action})`);
-          const playedSong = await this.executeAIResult(aiResult, accountId, msg.device_id);
+          const { playedSong } = await this.executeAIResult(aiResult, accountId, msg.device_id);
           if (memoryEnabled && aiResult.action === 'play_song' && playedSong) {
             this.queueMemorySuccess(query, playedSong);
           }
@@ -413,14 +420,16 @@ export class VoiceEngine {
           songloft.log.warn(`[VoiceMemory] error fallback: songId not playable id=${record.songId}`);
           return null;
         }
-        await this.prepareMemoryPlayback(accountId, deviceId);
+        const pm = await this.prepareMemoryPlayback(accountId, deviceId);
         const standalone = {
           id: song.id,
           url: song.url,
           title: song.title || songName,
           artist: song.artist || record.artist || '',
+          duration: song.duration,
+          cover_url: song.cover_url,
         };
-        const played = await this.playStandaloneSong(standalone, accountId, deviceId);
+        const played = await this.playStandaloneSong(standalone, pm, accountId, deviceId);
         return played ? {
           songId: standalone.id,
           songName: standalone.title,
@@ -513,7 +522,7 @@ export class VoiceEngine {
       if (aiResult && aiResult.confidence !== 'low' && aiResult.action !== 'unknown') {
         const search = await this.previewForAI(aiResult);
         const execStart = Date.now();
-        await this.executeAIResult(aiResult, acc, deviceId);
+        const execution = await this.executeAIResult(aiResult, acc, deviceId);
         songloft.log.info(`[VoiceEngine] [Test] AI execute done in ${Date.now() - execStart}ms (total ${Date.now() - testStart}ms)`);
         return {
           matched: true,
@@ -522,7 +531,8 @@ export class VoiceEngine {
           commandType: aiResult.action,
           argument: aiResult.params?.name || aiResult.params?.playlist || aiResult.params?.artist || '',
           search,
-          executed: true,
+          executed: execution.executed,
+          note: execution.executed ? undefined : '口令已识别，但设备操作未成功',
         };
       }
       // AI 未达标 → 回退规则匹配，同时把 AI 结果带回给前端展示
@@ -551,7 +561,7 @@ export class VoiceEngine {
     const search = await this.previewSearch(result.command.type, result.argument);
     songloft.log.info(`[VoiceEngine] [Test] previewSearch done in ${Date.now() - previewStart}ms`);
     const execStart = Date.now();
-    await this.executeCommand(result, accountId, deviceId);
+    const execution = await this.executeCommand(result, accountId, deviceId);
     songloft.log.info(`[VoiceEngine] [Test] executeCommand done in ${Date.now() - execStart}ms (total ${Date.now() - ruleStart}ms)`);
     return {
       matched: true,
@@ -560,7 +570,8 @@ export class VoiceEngine {
       keyword: result.keyword,
       argument: result.argument,
       search,
-      executed: true,
+      executed: execution.executed,
+      note: execution.executed ? undefined : '口令已匹配，但设备操作未成功',
     };
   }
 
@@ -735,49 +746,52 @@ export class VoiceEngine {
   /**
    * 执行匹配到的口令
    */
-  private async executeCommand(result: MatchResult, accountId: string, deviceId: string): Promise<PlayedSong | null> {
+  private async executeCommand(result: MatchResult, accountId: string, deviceId: string): Promise<CommandExecutionResult> {
     const pm = this.playlistManagerMap.get(accountId, deviceId);
     const wasPlaying = pm?.isPlaying() ?? false;
     let playedSong: PlayedSong | null = null;
+    let executed = false;
 
     switch (result.command.type) {
       case 'play_playlist':
-        await this.executePlayPlaylist(result.argument, accountId, deviceId);
+        executed = await this.executePlayPlaylist(result.argument, accountId, deviceId);
         break;
       case 'play_song':
         playedSong = await this.executePlaySong(result.argument, accountId, deviceId);
+        executed = playedSong !== null;
         break;
       case 'set_play_mode':
-        await this.executeSetPlayMode(accountId, deviceId, result.command.param || result.argument);
+        executed = await this.executeSetPlayMode(accountId, deviceId, result.command.param || result.argument);
         break;
       case 'set_volume':
-        await this.executeSetVolume(accountId, deviceId, result.command.param || 'absolute', result.argument);
+        executed = await this.executeSetVolume(accountId, deviceId, result.command.param || 'absolute', result.argument);
         break;
       case 'next':
-        await this.executeNext(accountId, deviceId);
+        executed = await this.executeNext(accountId, deviceId);
         break;
       case 'previous':
-        await this.executePrevious(accountId, deviceId);
+        executed = await this.executePrevious(accountId, deviceId);
         break;
       case 'stop':
-        await this.executeStop(accountId, deviceId);
+        executed = await this.executeStop(accountId, deviceId);
         break;
       default:
         songloft.log.warn(`[VoiceEngine] Unknown command type: ${result.command.type}`);
     }
 
     this.tryResumePlayback(result.command.type, wasPlaying, pm, accountId, deviceId);
-    return playedSong;
+    return { executed, playedSong };
   }
 
   /**
    * 执行 AI 分析结果
    */
-  private async executeAIResult(result: AIAnalysisResult, accountId: string, deviceId: string): Promise<PlayedSong | null> {
+  private async executeAIResult(result: AIAnalysisResult, accountId: string, deviceId: string): Promise<CommandExecutionResult> {
     songloft.log.info(`[VoiceEngine] [AI] Executing action=${result.action} params=${JSON.stringify(result.params)}`);
     const pm = this.playlistManagerMap.get(accountId, deviceId);
     const wasPlaying = pm?.isPlaying() ?? false;
     let playedSong: PlayedSong | null = null;
+    let executed = false;
 
     switch (result.action) {
       case 'play_song': {
@@ -785,7 +799,7 @@ export class VoiceEngine {
         const artist = result.params.artist || '';
         if (!name && !artist) {
           songloft.log.warn('[VoiceEngine] [AI] play_song: no name or artist to play');
-          return null;
+          return { executed: false, playedSong: null };
         }
         // 歌名+歌手都有：歌名作主搜索词、歌手作辅助字段（多字段 cover 匹配）；
         // 只有其一：用非空者作主搜索词
@@ -794,24 +808,25 @@ export class VoiceEngine {
         } else {
           playedSong = await this.executePlaySong(name || artist, accountId, deviceId);
         }
+        executed = playedSong !== null;
         break;
       }
       case 'play_playlist': {
         const playlist = result.params.playlist || '';
         if (!playlist) {
           songloft.log.warn('[VoiceEngine] [AI] play_playlist: no playlist name');
-          return null;
+          return { executed: false, playedSong: null };
         }
-        await this.executePlayPlaylist(playlist, accountId, deviceId);
+        executed = await this.executePlayPlaylist(playlist, accountId, deviceId);
         break;
       }
       case 'set_play_mode': {
         const mode = result.params.mode || '';
         if (!mode) {
           songloft.log.warn('[VoiceEngine] [AI] set_play_mode: no mode');
-          return null;
+          return { executed: false, playedSong: null };
         }
-        await this.executeSetPlayMode(accountId, deviceId, mode);
+        executed = await this.executeSetPlayMode(accountId, deviceId, mode);
         break;
       }
       /*case 'set_volume': {
@@ -821,20 +836,20 @@ export class VoiceEngine {
         break;
       }*/
       case 'next':
-        await this.executeNext(accountId, deviceId);
+        executed = await this.executeNext(accountId, deviceId);
         break;
       case 'previous':
-        await this.executePrevious(accountId, deviceId);
+        executed = await this.executePrevious(accountId, deviceId);
         break;
       case 'stop':
-        await this.executeStop(accountId, deviceId);
+        executed = await this.executeStop(accountId, deviceId);
         break;
       default:
         songloft.log.warn(`[VoiceEngine] [AI] Unknown action: ${result.action}`);
     }
 
     this.tryResumePlayback(result.action, wasPlaying, pm, accountId, deviceId);
-    return playedSong;
+    return { executed, playedSong };
   }
 
   /**
@@ -853,15 +868,14 @@ export class VoiceEngine {
    * 执行播放歌单
    * 通过 IndexingManager 模糊匹配歌单名，然后调用 PlaylistManager 播放
    */
-  private async executePlayPlaylist(playlistName: string, accountId: string, deviceId: string): Promise<void> {
+  private async executePlayPlaylist(playlistName: string, accountId: string, deviceId: string): Promise<boolean> {
     this.cancelPendingResume();
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
 
     // 空参数 + 有活跃歌单：直接恢复播放，无需搜索和打断
     if (!playlistName && pm.hasPlaylist()) {
       songloft.log.info('[VoiceEngine] Play playlist: resume last playback');
-      await pm.next();
-      return;
+      return await pm.next();
     }
 
     // 立即停止定时器和重置状态，防止后续异步操作期间旧定时器触发
@@ -876,7 +890,7 @@ export class VoiceEngine {
       const result = await this.indexingManager.refresh();
       if (!result.success || !this.indexingManager.isIndexReady()) {
         songloft.log.warn('[VoiceEngine] Playlist index refresh failed, skip play playlist');
-        return;
+        return false;
       }
       songloft.log.info(`[VoiceEngine] Playlist index refreshed on-demand: playlists=${result.playlistCount} songs=${result.songCount}`);
     }
@@ -887,7 +901,7 @@ export class VoiceEngine {
       const playlists = this.indexingManager.searchPlaylist('');
       if (playlists.length === 0) {
         songloft.log.warn('[VoiceEngine] No playlists available');
-        return;
+        return false;
       }
       playlistName = playlists[0].name;
       songloft.log.info(`[VoiceEngine] No name specified, using default playlist: ${playlistName}`);
@@ -898,7 +912,7 @@ export class VoiceEngine {
     if (!matchedPlaylist) {
       songloft.log.warn(`[VoiceEngine] Playlist not found: ${playlistName}`);
       await this.minaService.textToSpeech(accountId, deviceId, `未找到歌单：${playlistName}`);
-      return;
+      return false;
     }
 
     songloft.log.info(`[VoiceEngine] Matched playlist: ${matchedPlaylist.name} (id=${matchedPlaylist.id})`);
@@ -923,7 +937,7 @@ export class VoiceEngine {
     const ok = await pm.play(matchedPlaylist.id, startIndex, playMode);
     if (ok) {
       songloft.log.info(`[VoiceEngine] Play playlist success: ${matchedPlaylist.name} index=${startIndex} mode=${playMode}`);
-      return;
+      return true;
     }
 
     // 播放失败且因歌单 ID 已失效：刷新索引后按名字重新查找并重试一次
@@ -937,14 +951,15 @@ export class VoiceEngine {
         const retryOk = await pm.play(newPlaylist.id, 0, playMode);
         if (retryOk) {
           songloft.log.info(`[VoiceEngine] Retry play playlist success: ${newPlaylist.name}`);
-          return;
+          return true;
         }
       }
       songloft.log.error(`[VoiceEngine] Retry play playlist failed after index refresh: ${playlistName}`);
-      return;
+      return false;
     }
 
     songloft.log.error(`[VoiceEngine] Play playlist failed: ${matchedPlaylist.name}`);
+    return false;
   }
 
   /**
@@ -1229,7 +1244,7 @@ export class VoiceEngine {
         return playedLoc ? this.playedSongFromLocation(playedLoc) : null;
       }
       case 'remote_song': {
-        const played = await this.playStandaloneSong(candidate.song, accountId, deviceId);
+        const played = await this.playStandaloneSong(candidate.song, pm, accountId, deviceId);
         return played ? {
           songId: candidate.song.id,
           songName: candidate.song.title,
@@ -1264,6 +1279,7 @@ export class VoiceEngine {
 
   private async playStandaloneSong(
     standalone: StandaloneSongCandidate,
+    pm: PlaylistManager,
     accountId: string,
     deviceId: string,
   ): Promise<boolean> {
@@ -1282,6 +1298,13 @@ export class VoiceEngine {
       return false;
     }
 
+    pm.beginExternalPlayback({
+      id: standalone.id,
+      title: standalone.title,
+      artist: standalone.artist,
+      duration: standalone.duration,
+      cover_url: standalone.cover_url,
+    });
     songloft.log.info('[VoiceEngine] Played standalone remote song: ' + standalone.title + ' - ' + standalone.artist);
     return true;
   }
@@ -1336,10 +1359,10 @@ export class VoiceEngine {
    * 执行设置播放模式
    * @param modeParam - 播放模式参数（来自 command.param 或 argument）
    */
-  private async executeSetPlayMode(accountId: string, deviceId: string, modeParam: string): Promise<void> {
+  private async executeSetPlayMode(accountId: string, deviceId: string, modeParam: string): Promise<boolean> {
     if (!modeParam) {
       songloft.log.warn('[VoiceEngine] Set play mode: missing mode param');
-      return;
+      return false;
     }
 
     // 尝试从参数中提取播放模式
@@ -1361,22 +1384,24 @@ export class VoiceEngine {
     const playMode = modeMap[modeParam];
     if (!playMode) {
       songloft.log.warn(`[VoiceEngine] Unknown play mode: ${modeParam}`);
-      return;
+      return false;
     }
 
     const pm = this.playlistManagerMap.get(accountId, deviceId);
     if (pm) {
-      await pm.setPlayMode(playMode);
+      return await pm.setPlayMode(playMode);
     } else {
       // 没有活跃的播放管理器，仅更新配置
       try {
         await this.configManager.updateDevice(accountId, deviceId, { play_mode: playMode });
       } catch (e) {
         songloft.log.error(`[VoiceEngine] Failed to update play mode config: ${String(e)}`);
+        return false;
       }
     }
 
     songloft.log.info(`[VoiceEngine] Play mode set to: ${playMode}`);
+    return true;
   }
 
   /**
@@ -1384,7 +1409,7 @@ export class VoiceEngine {
    * @param param - 音量方向："absolute"|"up"|"down"
    * @param argument - 口令关键词后的文本（用于提取数字）
    */
-  private async executeSetVolume(accountId: string, deviceId: string, param: string, argument: string): Promise<void> {
+  private async executeSetVolume(accountId: string, deviceId: string, param: string, argument: string): Promise<boolean> {
     let currentVolume = 50;
 
     if (param === 'up' || param === 'down') {
@@ -1417,7 +1442,7 @@ export class VoiceEngine {
         const volume = this.extractNumber(argument);
         if (volume === null) {
           songloft.log.warn(`[VoiceEngine] No volume number found in: ${argument}`);
-          return;
+          return false;
         }
         targetVolume = volume;
         break;
@@ -1436,12 +1461,13 @@ export class VoiceEngine {
     } else {
       songloft.log.error(`[VoiceEngine] Failed to set volume: ${targetVolume}`);
     }
+    return ok;
   }
 
   /**
    * 执行下一首
    */
-  private async executeNext(accountId: string, deviceId: string): Promise<void> {
+  private async executeNext(accountId: string, deviceId: string): Promise<boolean> {
     this.cancelPendingResume();
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
     const ok = await pm.next();
@@ -1450,12 +1476,13 @@ export class VoiceEngine {
     } else {
       songloft.log.warn(`[VoiceEngine] Next song failed or no next`);
     }
+    return ok;
   }
 
   /**
    * 执行上一首
    */
-  private async executePrevious(accountId: string, deviceId: string): Promise<void> {
+  private async executePrevious(accountId: string, deviceId: string): Promise<boolean> {
     this.cancelPendingResume();
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
     const ok = await pm.previous();
@@ -1464,16 +1491,18 @@ export class VoiceEngine {
     } else {
       songloft.log.warn(`[VoiceEngine] Previous song failed or no previous`);
     }
+    return ok;
   }
 
   /**
    * 执行停止播放
    */
-  private async executeStop(accountId: string, deviceId: string): Promise<void> {
+  private async executeStop(accountId: string, deviceId: string): Promise<boolean> {
     this.cancelPendingResume();
     const pm = await this.playlistManagerMap.getOrCreate(accountId, deviceId);
-    await pm.stop();
-    songloft.log.info(`[VoiceEngine] Playback stopped`);
+    const stopped = await pm.stop();
+    songloft.log.info(`[VoiceEngine] Playback stop accepted=${stopped}`);
+    return stopped;
   }
 
   /**

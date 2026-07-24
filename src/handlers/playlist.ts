@@ -361,7 +361,7 @@ export function registerPlaylistHandlers(
         return jsonResponse({ success: true, data: { message: 'playlist paused', state: 'paused' } });
       }
 
-      if (!manager.hasPlaylist()) {
+      if (!manager.hasPlaylist() && !manager.hasExternalPlayback()) {
         return jsonResponse({ success: false, error: 'no playlist loaded, please select a playlist first' });
       }
 
@@ -389,6 +389,11 @@ export function registerPlaylistHandlers(
       }
       if (isLoopbackAddress(config.server_host)) {
         return jsonResponse({ success: false, error: '服务器地址为本地回环地址，MIoT 智能音箱无法访问。请在「设置」中修改为局域网 IP 地址。' });
+      }
+
+      // 外部播放只能通过设备 resume 恢复，不能伪造一个本地歌单。
+      if (manager.hasExternalPlayback()) {
+        return jsonResponse({ success: false, error: 'failed to resume external playback' });
       }
 
       // 处于 stopped 状态或 resumePlayback 失败，重新播放

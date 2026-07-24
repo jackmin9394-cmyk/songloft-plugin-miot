@@ -278,6 +278,12 @@ export class OnlineSearcher {
           songloft.log.error('[OnlineSearcher] No-import: failed to push URL to device; hasUrl=true');
           return false;
         }
+        pm?.beginExternalPlayback({
+          title: song.title,
+          artist: song.artist,
+          duration: song.duration,
+          cover_url: song.cover_url,
+        });
         songloft.log.info('[OnlineSearcher] Playing online song (no-import): ' + song.title + ' - ' + song.artist + ' hasUrl=true');
         return true;
       }
@@ -357,6 +363,13 @@ export class OnlineSearcher {
       songloft.log.error('[OnlineSearcher] Failed to push URL to device; hasPlayUrl=true');
       return false;
     }
+    pm?.beginExternalPlayback({
+      id: imported.id,
+      title: song.title,
+      artist: song.artist,
+      duration: song.duration,
+      cover_url: song.cover_url,
+    });
 
     // 增量把这首独立远程歌曲加入内存索引，避免为一首歌重建全部歌单缓存。
     if (indexingManager) {

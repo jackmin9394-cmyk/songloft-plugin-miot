@@ -42,6 +42,21 @@ interface PlaylistSongsResponse {
   };
 }
 
+export interface ExternalPlaybackMetadata {
+  id?: number;
+  title: string;
+  artist?: string;
+  duration?: number;
+  cover_url?: string;
+  lyric_url?: string;
+}
+
+interface ExternalPlaybackState {
+  song: ExternalPlaybackMetadata;
+  positionSec: number;
+  startedAtMs: number;
+}
+
 /** HTTP 手动“下一首”的详细结果；旧调用方继续使用 next(): Promise<boolean>。 */
 export type ManualNextResult =
   | { success: true; advanced: true; code: 'advanced' }
@@ -75,6 +90,7 @@ export class PlaylistManager {
   private randomPlayed: Set<number> = new Set(); // 随机模式已播放索引
   private voiceSuspendedAt: number = 0; // suspendForVoiceInteraction 首次调用时间戳
   private _lastLoadNotFound: boolean = false; // 上次 loadPlaylistSongs 失败是否因歌单不存在(ID 过期)
+  private externalPlayback: ExternalPlaybackState | null = null;
 
   constructor(
     accountId: string,
@@ -198,9 +214,14 @@ export class PlaylistManager {
    * 暂停播放（保持状态，可恢复）
    */
   async pause(): Promise<void> {
+    const position = this.getPosition();
     this.stopCheckTimer();
     this.clearVoiceSuspend();
     this.state = 'paused';
+    if (this.externalPlayback) {
+      this.externalPlayback.positionSec = position;
+      this.externalPlayback.startedAtMs = 0;
+    }
     // 不重置 playStartTimeMs，保持当前播放进度
 
     // 调用设备暂停
@@ -214,17 +235,19 @@ export class PlaylistManager {
   /**
    * 停止播放
    */
-  async stop(): Promise<void> {
+  async stop(): Promise<boolean> {
     this.stopCheckTimer();
     this.clearVoiceSuspend();
     this.state = 'stopped';
     this.playStartTimeMs = 0;
+    this.externalPlayback = null;
 
-    if (this.accountId && this.deviceId) {
-      await this.minaService.stopPlay(this.accountId, this.deviceId);
-    }
+    const stopped = this.accountId && this.deviceId
+      ? await this.minaService.stopPlay(this.accountId, this.deviceId)
+      : false;
 
     songloft.log.info('[PlaylistManager] Playback stopped');
+    return stopped;
   }
 
   /**
@@ -312,7 +335,7 @@ export class PlaylistManager {
   /**
    * 设置播放模式
    */
-  async setPlayMode(mode: PlayMode): Promise<void> {
+  async setPlayMode(mode: PlayMode): Promise<boolean> {
     this.playMode = mode;
 
     // 切换到随机模式时重置已播放记录
@@ -327,15 +350,38 @@ export class PlaylistManager {
       });
     } catch (e) {
       songloft.log.warn('[PlaylistManager] Failed to save play mode: ' + String(e));
+      return false;
     }
 
     songloft.log.info('[PlaylistManager] Play mode set to ' + mode);
+    return true;
   }
 
   /**
    * 获取播放状态
    */
   getStatus(): PlayerStatus {
+    if (this.externalPlayback) {
+      const external = this.externalPlayback.song;
+      return {
+        state: this.state,
+        playback_source: 'external',
+        play_mode: this.playMode,
+        playlist_id: 0,
+        current_index: -1,
+        current_song: {
+          id: external.id ?? 0,
+          title: external.title,
+          artist: external.artist || '',
+          cover_url: external.cover_url,
+          lyric_url: external.lyric_url,
+        },
+        position: this.getPosition(),
+        duration: Math.max(0, external.duration || 0),
+        is_playing: this.state === 'playing',
+      };
+    }
+
     let currentSong: { id: number; title: string; artist: string; cover_url?: string; lyric_url?: string } | undefined;
     let duration = 0;
     if (this.currentIndex >= 0 && this.currentIndex < this.songs.length) {
@@ -346,6 +392,7 @@ export class PlaylistManager {
 
     return {
       state: this.state,
+      playback_source: 'playlist',
       play_mode: this.playMode,
       playlist_id: this.playlistId,
       current_index: this.currentIndex,
@@ -381,6 +428,33 @@ export class PlaylistManager {
   }
 
   /**
+   * 注册不属于本地歌单状态机的成功播放（例如 no-import 或独立远程歌曲）。
+   * 只保存展示和控制所需的非敏感元数据，绝不保存上游 URL 或代理 token。
+   */
+  beginExternalPlayback(song: ExternalPlaybackMetadata): void {
+    this.stopCheckTimer();
+    this.clearVoiceSuspend();
+    this.externalPlayback = {
+      song: {
+        id: song.id,
+        title: song.title,
+        artist: song.artist || '',
+        duration: Math.max(0, Math.floor(song.duration || 0)),
+        cover_url: song.cover_url,
+        lyric_url: song.lyric_url,
+      },
+      positionSec: 0,
+      startedAtMs: Date.now(),
+    };
+    this.state = 'playing';
+    this.playStartTimeMs = 0;
+  }
+
+  hasExternalPlayback(): boolean {
+    return this.externalPlayback !== null;
+  }
+
+  /**
    * 是否仍处于允许用设备进度校准本地自动切歌定时器的窗口。
    * 仅用于播放刚开始的缓冲修正；歌曲接近结束后不允许设备端小进度回拨定时器，
    * 否则某些音箱循环拉同一 URL 时会把自动下一首无限推迟。
@@ -411,7 +485,8 @@ export class PlaylistManager {
    * 同时重置切歌定时器以补偿暂停时间
    */
   async resumePlayback(): Promise<boolean> {
-    if ((this.state !== 'playing' && this.state !== 'paused') || this.songs.length === 0) {
+    if ((this.state !== 'playing' && this.state !== 'paused')
+      || (this.songs.length === 0 && !this.externalPlayback)) {
       return false;
     }
 
@@ -424,6 +499,11 @@ export class PlaylistManager {
     }
 
     this.state = 'playing';
+
+    if (this.externalPlayback) {
+      this.externalPlayback.startedAtMs = Date.now();
+      return true;
+    }
 
     const song = this.getCurrentSong();
     if (song && song.duration > 0 && this.playStartTimeMs > 0) {
@@ -442,6 +522,15 @@ export class PlaylistManager {
    * 获取当前播放位置（秒）
    */
   getPosition(): number {
+    if (this.externalPlayback) {
+      const base = this.externalPlayback.positionSec;
+      if (this.state !== 'playing' || this.externalPlayback.startedAtMs === 0) {
+        return base;
+      }
+      const elapsed = (Date.now() - this.externalPlayback.startedAtMs) / 1000;
+      const duration = Math.max(0, this.externalPlayback.song.duration || 0);
+      return duration > 0 ? Math.min(base + elapsed, duration) : base + elapsed;
+    }
     if (this.state !== 'playing' || this.playStartTimeMs === 0) {
       return 0;
     }
@@ -470,6 +559,7 @@ export class PlaylistManager {
     this.clearVoiceSuspend();
     this.state = 'idle';
     this.playStartTimeMs = 0;
+    this.externalPlayback = null;
   }
 
   /**
@@ -651,6 +741,7 @@ export class PlaylistManager {
       return false;
     }
 
+    this.externalPlayback = null;
     this.clearVoiceSuspend();
     this.state = 'playing';
     this.playStartTimeMs = Date.now();
