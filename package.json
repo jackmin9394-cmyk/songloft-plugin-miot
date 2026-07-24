@@ -10,6 +10,7 @@
     "test:external-playback": "node scripts/run-external-playback-tests.mjs",
     "test:test-command": "node scripts/run-test-command-tests.mjs",
     "test:search-service": "node scripts/run-search-service-tests.mjs",
+    "test:unified-search-ui": "node scripts/run-unified-search-ui-tests.mjs",
     "predev": "node scripts/fetch-holidays.mjs && node scripts/build-pinyin-data.mjs",
     "dev": "songloft-plugin dev",
     "validate": "songloft-plugin validate",

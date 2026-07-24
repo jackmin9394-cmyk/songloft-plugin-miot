@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Unified Search UI Acceptance</title>
+    <link rel="stylesheet" href="../../static/css/style.css">
+</head>
+<body>
+    <header class="app-bar miot-v2-app-bar">
+        <span class="material-symbols-outlined app-bar-icon">speaker</span>
+        <h1>MIoT 智能音箱</h1>
+    </header>
+    <div class="player-toolbar miot-v2-player-toolbar" id="playerToolbar">
+        <div class="toolbar-device-selector miot-v2-device-card">
+            <span class="material-symbols-outlined toolbar-device-icon">speaker</span>
+            <span class="toolbar-device-label">客厅音箱</span>
+        </div>
+        <div class="toolbar-divider"></div>
+        <div class="playlist-selector miot-v2-playlist-row">
+            <span class="material-symbols-outlined">queue_music</span>
+            <span class="playlist-selector-text">常听歌单</span>
+        </div>
+    </div>
+    <main class="page-content active miot-v2-player-page">
+        <div class="container">
+            <select id="playlistSelect" hidden><option value="7" selected>常听歌单</option></select>
+            <div class="unified-search-shell" id="unifiedSearchShell" style="display:none">
+                <div class="search-bar miot-v2-song-search" id="songSearchBar">
+                    <span class="material-symbols-outlined">search</span>
+                    <input id="songSearchInput" placeholder="搜索歌曲、歌单、歌手、专辑…" aria-label="搜索本地与在线音乐">
+                    <select id="searchTypeFilter" class="unified-search-type" aria-label="搜索结果类型">
+                        <option value="all">全部</option>
+                        <option value="songs">歌曲</option>
+                        <option value="playlists">歌单</option>
+                        <option value="artists">歌手</option>
+                        <option value="albums">专辑</option>
+                        <option value="online" id="searchTypeOnlineOption" hidden>在线</option>
+                    </select>
+                </div>
+                <div class="unified-search-filters" aria-label="搜索范围">
+                    <button type="button" class="unified-search-chip active" data-search-scope="all">全部</button>
+                    <button type="button" class="unified-search-chip" data-search-scope="local">本地</button>
+                    <button type="button" class="unified-search-chip" data-search-scope="online" id="onlineSearchScope" hidden>在线</button>
+                    <select id="searchSourceFilter" class="unified-search-source" aria-label="在线来源" hidden>
+                        <option value="all">全部来源</option>
+                    </select>
+                </div>
+            </div>
+            <div id="localSearchResults" class="local-search-results" style="display:none" aria-live="polite"></div>
+            <div id="songList" class="song-list miot-v2-song-list">
+                <div class="song-item"><span>原歌单歌曲</span></div>
+            </div>
+        </div>
+    </main>
+    <div class="player-bar" id="playerBar">
+        <div class="player-bar-info"><strong>底部播放器</strong><span>未播放</span></div>
+    </div>
+    <script>
+        globalThis.SongloftPlugin = {
+            apiGet: async path => {
+                if (path === '/search-providers') {
+                    return {
+                        providers: [
+                            { id: 'provider-a', name: '来源 A', installed: true, active: true },
+                            { id: 'provider-b', name: '来源 B', installed: true, active: true }
+                        ]
+                    };
+                }
+                if (path.startsWith('/search?')) {
+                    return {
+                        success: true,
+                        data: {
+                            query: '测试歌曲',
+                            songs: [{
+                                id: 1,
+                                title: '测试歌曲',
+                                artist: '本地歌手',
+                                album: '本地专辑',
+                                duration: 215,
+                                playlist_id: 7,
+                                song_index: 0
+                            }],
+                            playlists: [{ id: 7, name: '常听歌单', song_count: 12 }],
+                            artists: [],
+                            albums: [],
+                            online_status: 'partial',
+                            online: [{
+                                group_id: 'group-1',
+                                title: '测试歌曲',
+                                artist: '在线歌手',
+                                album: '在线专辑',
+                                duration: 218,
+                                versions: [
+                                    { candidate_id: 'candidate-a', source_id: 'provider-a', source_name: '来源 A', title: '测试歌曲', duration: 218 },
+                                    { candidate_id: 'candidate-b', source_id: 'provider-b', source_name: '来源 B', title: '测试歌曲（现场版）', duration: 231 }
+                                ]
+                            }]
+                        }
+                    };
+                }
+                throw new Error('unexpected path');
+            }
+        };
+    </script>
+    <script type="module">
+        import { initSongSearch } from '../../static/js/search.js';
+        globalThis.acceptancePlayedCandidate = '';
+        initSongSearch({
+            playSong: async () => true,
+            playOnline: async candidateId => {
+                globalThis.acceptancePlayedCandidate = candidateId;
+                return true;
+            }
+        });
+    </script>
+</body>
+</html>

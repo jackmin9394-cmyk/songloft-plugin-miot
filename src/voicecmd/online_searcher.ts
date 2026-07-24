@@ -43,6 +43,11 @@ export interface OnlineSearchHit {
   result: OnlineSearchResult;
 }
 
+export interface OnlineSearchAggregate {
+  hits: OnlineSearchHit[];
+  status: 'available' | 'partial' | 'no_result';
+}
+
 // 外部搜索 API 响应
 interface SearchOneResponse {
   code: number;
@@ -193,8 +198,19 @@ export class OnlineSearcher {
     keyword: string,
     hint: { title: string; artist?: string; duration?: number } | null,
   ): Promise<OnlineSearchHit[]> {
+    return (await this.searchAllDetailed(keyword, hint)).hits;
+  }
+
+  /**
+   * 统一搜索 UI 使用的聚合结果，额外给出公开的完成状态。
+   * 不区分单源的超时、失败或无结果细节，避免向 UI 泄漏 provider 内部信息。
+   */
+  async searchAllDetailed(
+    keyword: string,
+    hint: { title: string; artist?: string; duration?: number } | null,
+  ): Promise<OnlineSearchAggregate> {
     const sources = await this.getEnabledSources();
-    if (sources.length === 0) return [];
+    if (sources.length === 0) return { hits: [], status: 'no_result' };
 
     const config = await this.configManager.getConfig();
     const timeoutSec = config.external_search_timeout > 0 ? config.external_search_timeout : 6;
@@ -217,7 +233,12 @@ export class OnlineSearcher {
       `[OnlineSearcher] aggregate completed sources=${sources.length} hits=${hits.length}`
       + ` queryLength=${normalizeSearchLength(keyword)}`,
     );
-    return hits;
+    return {
+      hits,
+      status: hits.length === 0
+        ? 'no_result'
+        : (hits.length < sources.length ? 'partial' : 'available'),
+    };
   }
 
   /**

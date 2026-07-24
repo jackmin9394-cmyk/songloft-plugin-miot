@@ -45,13 +45,31 @@
         <div class="container">
             <select id="playlistSelect" style="display:none" aria-label="选择歌单"></select>
 
-            <!-- 歌曲搜索栏 -->
-            <div class="search-bar miot-v2-song-search" id="songSearchBar" style="display:none">
-                <span class="material-symbols-outlined">search</span>
-                <input type="text" id="songSearchInput" placeholder="搜索歌曲、歌单、歌手、专辑…" autocomplete="off" aria-label="搜索本地歌曲、歌单、歌手和专辑">
+            <!-- 紧凑统一搜索栏；保留原输入框 ID 与既有初始化入口。 -->
+            <div class="unified-search-shell" id="unifiedSearchShell" style="display:none">
+                <div class="search-bar miot-v2-song-search" id="songSearchBar">
+                    <span class="material-symbols-outlined">search</span>
+                    <input type="text" id="songSearchInput" placeholder="搜索歌曲、歌单、歌手、专辑…" autocomplete="off" aria-label="搜索本地与在线音乐">
+                    <select id="searchTypeFilter" class="unified-search-type" aria-label="搜索结果类型">
+                        <option value="all">全部</option>
+                        <option value="songs">歌曲</option>
+                        <option value="playlists">歌单</option>
+                        <option value="artists">歌手</option>
+                        <option value="albums">专辑</option>
+                        <option value="online" id="searchTypeOnlineOption" hidden>在线</option>
+                    </select>
+                </div>
+                <div class="unified-search-filters" id="unifiedSearchFilters" aria-label="搜索范围">
+                    <button type="button" class="unified-search-chip active" data-search-scope="all">全部</button>
+                    <button type="button" class="unified-search-chip" data-search-scope="local">本地</button>
+                    <button type="button" class="unified-search-chip" data-search-scope="online" id="onlineSearchScope" hidden>在线</button>
+                    <select id="searchSourceFilter" class="unified-search-source" aria-label="在线来源" hidden>
+                        <option value="all">全部来源</option>
+                    </select>
+                </div>
             </div>
 
-            <!-- 本地统一搜索结果；与当前歌单 DOM 分离，避免覆盖歌单缓存。 -->
+            <!-- 统一搜索结果；与当前歌单 DOM 分离，避免覆盖歌单缓存。 -->
             <div class="local-search-results" id="localSearchResults" style="display:none" aria-live="polite"></div>
 
             <!-- 歌曲列表 -->

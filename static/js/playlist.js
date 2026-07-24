@@ -33,6 +33,7 @@ function localSearchActions() {
     return {
         selectPlaylist,
         playSong: playLocalSearchSong,
+        playOnline: playOnlineSearchCandidate,
         loadCover: scheduleCoverLoad,
         cancelCovers: cancelQueuedCovers,
     };
@@ -471,6 +472,38 @@ export function playLocalSearchSong(song) {
         return Promise.resolve(false);
     }
     return playPlaylistAt(playlistId, songIndex);
+}
+
+/**
+ * 播放统一搜索返回的服务端缓存候选。
+ * UI 只发送 opaque candidate_id；provider URL/source_data 不从浏览器回传。
+ */
+export function playOnlineSearchCandidate(candidateId) {
+    const accountId = getAccountId();
+    if (!accountId) return Promise.resolve(false);
+    const deviceId = getDeviceId();
+    if (!deviceId) return Promise.resolve(false);
+    if (!candidateId || typeof candidateId !== 'string') return Promise.resolve(false);
+
+    showLoading();
+    return apiPost('/search/play', {
+        candidate_id: candidateId,
+        account_id: accountId,
+        device_id: deviceId,
+    }).then(data => {
+        hideLoading();
+        if (!data || !data.success) {
+            showSnackbar(data?.error || '在线候选已过期或播放失败，请重新搜索', 'error');
+            return false;
+        }
+        showSnackbar('开始播放在线版本', 'success');
+        loadDeviceStatus();
+        return true;
+    }).catch(error => {
+        hideLoading();
+        showSnackbar(error?.message || '在线播放失败', 'error');
+        return false;
+    });
 }
 
 /** 复用现有 /player/play 入口播放指定歌单位置。 */

@@ -4065,7 +4065,70 @@ html.embed .player-bar-cover {
     font-size: 15px;
 }
 
-/* 阶段 3：本地统一搜索结果与当前歌单列表并列，搜索时只切换可见性。 */
+.unified-search-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.unified-search-shell #songSearchBar {
+    display: flex;
+}
+
+.unified-search-type,
+.unified-search-source {
+    flex: 0 0 auto;
+    height: 36px;
+    padding: 0 28px 0 10px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 11px;
+    background: var(--md-surface);
+    color: var(--md-primary);
+    font: inherit;
+    font-size: 13px;
+}
+
+.unified-search-type {
+    max-width: 92px;
+}
+
+.unified-search-filters {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.unified-search-filters::-webkit-scrollbar {
+    display: none;
+}
+
+.unified-search-chip {
+    height: 32px;
+    flex: 0 0 auto;
+    padding: 0 14px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 16px;
+    background: var(--md-surface);
+    color: var(--md-on-surface-variant);
+    font: inherit;
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.unified-search-chip.active {
+    border-color: color-mix(in srgb, var(--md-primary) 44%, transparent);
+    background: var(--miot-v2-accent-soft);
+    color: var(--md-primary);
+}
+
+.unified-search-source {
+    min-width: 118px;
+}
+
+/* 统一搜索结果与当前歌单列表并列，搜索时只切换可见性。 */
 .local-search-results {
     min-width: 0;
     padding-bottom: 4px;
@@ -4243,6 +4306,129 @@ button.local-search-row:hover {
 .local-search-duration {
     font-size: 13px;
     font-variant-numeric: tabular-nums;
+}
+
+.online-search-group-row {
+    border-bottom: 1px solid var(--md-outline-variant);
+}
+
+.online-search-group-row:last-child {
+    border-bottom: 0;
+}
+
+.online-search-group-header {
+    min-height: 66px;
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    padding: 9px 12px;
+}
+
+.online-search-version-count {
+    flex: 0 0 auto;
+    color: var(--md-on-surface-variant);
+    font-size: 12px;
+}
+
+.online-search-expand {
+    width: 34px;
+    height: 34px;
+    flex: 0 0 34px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--md-on-surface-variant);
+    cursor: pointer;
+}
+
+.online-search-versions {
+    display: none;
+    padding: 0 10px 9px 68px;
+}
+
+.online-search-group-row.expanded .online-search-versions,
+.online-search-group-row.single-version .online-search-versions {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+.online-search-version {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 9px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 12px;
+    background: var(--md-surface);
+    color: var(--md-on-surface);
+}
+
+.online-search-version.active {
+    border-color: var(--md-primary);
+    background: var(--miot-v2-accent-soft);
+}
+
+.online-search-source-badge {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    color: var(--md-on-surface);
+    font-size: 13px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.online-search-version-meta {
+    flex: 0 1 auto;
+    color: var(--md-on-surface-variant);
+    font-size: 12px;
+    white-space: nowrap;
+}
+
+.online-search-play {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    border-radius: 50%;
+    background: var(--miot-v2-accent-soft);
+    color: var(--md-primary);
+    cursor: pointer;
+}
+
+.online-search-play .material-symbols-outlined {
+    font-size: 20px;
+}
+
+.online-search-status {
+    margin-top: 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--md-outline-variant);
+    border-radius: 12px;
+    background: var(--md-surface-container-low);
+    color: var(--md-on-surface-variant);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+@media (max-width: 420px) {
+    .unified-search-type {
+        max-width: 82px;
+        padding-left: 8px;
+    }
+
+    .online-search-versions {
+        padding-left: 12px;
+    }
 }
 
 .miot-v2-song-list {

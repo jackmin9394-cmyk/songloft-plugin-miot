@@ -105,7 +105,10 @@ async function onInit(): Promise<void> {
   registerSearchHandlers(
     router,
     indexingManager,
-    new SearchService(indexingManager, new OnlineSearcher(configManager)),
+    new SearchService(indexingManager, new OnlineSearcher(configManager), {
+      minaService,
+      playlistManagerMap,
+    }),
   );
   registerMemoryHandlers(router, memoryService, configManager);
   registerLyricHandlers(router);
