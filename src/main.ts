@@ -29,6 +29,7 @@ import { registerLyricHandlers } from './handlers/lyric';
 import { registerSearchProviderComm } from './handlers/search_registry';
 import { registerSearchHandlers } from './handlers/search';
 import { SearchService } from './search/service';
+import { DownloaderClient } from './downloader/client';
 import { OnlineSearcher } from './voicecmd/online_searcher';
 import { setHostBaseUrl } from './utils/http';
 import { setPollDebug } from './utils/debug';
@@ -108,6 +109,7 @@ async function onInit(): Promise<void> {
     new SearchService(indexingManager, new OnlineSearcher(configManager), {
       minaService,
       playlistManagerMap,
+      downloaderClient: new DownloaderClient(),
     }),
   );
   registerMemoryHandlers(router, memoryService, configManager);

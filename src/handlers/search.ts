@@ -80,4 +80,21 @@ export function registerSearchHandlers(
       return jsonResponse({ success: false, error: error?.message || String(error) }, 500);
     }
   });
+
+  router.get('/search/capabilities', async () => jsonResponse({
+    success: true,
+    data: { downloader_available: await searchService.downloaderAvailable() },
+  }));
+
+  router.post('/search/download', async (req: HTTPRequest) => {
+    const body = parseBody(req);
+    const candidateId = typeof body.candidate_id === 'string' ? body.candidate_id.trim() : '';
+    if (!candidateId) {
+      return jsonResponse({ success: false, error: 'candidate_id is required' }, 400);
+    }
+    const task = await searchService.downloadOnline(candidateId);
+    return task
+      ? jsonResponse({ success: true, data: task }, 202)
+      : jsonResponse({ success: false, error: 'downloader unavailable or candidate expired' }, 409);
+  });
 }

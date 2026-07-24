@@ -554,6 +554,10 @@ export class OnlineSearcher {
     }
   }
 
+  async importSearchResult(song: OnlineSearchResult): Promise<{ id: number; url: string } | null> {
+    return await this.importSong(song);
+  }
+
   /**
    * 在 Songloft 数据库中查找已存在的外部导入歌曲
    * 当 /api/v1/songs/remote 因唯一键约束冲突等无法重复导入时作为回退

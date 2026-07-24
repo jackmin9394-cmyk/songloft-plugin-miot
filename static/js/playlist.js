@@ -34,6 +34,7 @@ function localSearchActions() {
         selectPlaylist,
         playSong: playLocalSearchSong,
         playOnline: playOnlineSearchCandidate,
+        downloadOnline: downloadOnlineSearchCandidate,
         loadCover: scheduleCoverLoad,
         cancelCovers: cancelQueuedCovers,
     };
@@ -502,6 +503,21 @@ export function playOnlineSearchCandidate(candidateId) {
     }).catch(error => {
         hideLoading();
         showSnackbar(error?.message || '在线播放失败', 'error');
+        return false;
+    });
+}
+
+export function downloadOnlineSearchCandidate(candidateId) {
+    if (!candidateId || typeof candidateId !== 'string') return Promise.resolve(false);
+    return apiPost('/search/download', { candidate_id: candidateId }).then(data => {
+        if (!data?.success) {
+            showSnackbar(data?.error || '下载任务创建失败', 'error');
+            return false;
+        }
+        showSnackbar('已交给 Songloft 下载管理器处理', 'success');
+        return true;
+    }).catch(error => {
+        showSnackbar(error?.message || '下载管理器暂时不可用', 'error');
         return false;
     });
 }

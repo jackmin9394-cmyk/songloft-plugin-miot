@@ -11,6 +11,7 @@ let searchTimer = null;
 let searchRequestSequence = 0;
 let searchActions = {};
 let searchControlsInitialized = false;
+let downloaderAvailable = false;
 const onlineSearchAvailable = true;
 let currentResults = null;
 let currentKeyword = '';
@@ -62,9 +63,19 @@ export function initSongSearch(actions = {}) {
         const onlineType = document.getElementById('searchTypeOnlineOption');
         if (onlineScope) onlineScope.hidden = false;
         if (onlineType) onlineType.hidden = false;
+        void refreshDownloaderCapability();
     }
 
     if (!(input.value || '').trim()) leaveSearchMode();
+}
+
+async function refreshDownloaderCapability() {
+    try {
+        const response = await apiGet('/search/capabilities');
+        downloaderAvailable = response?.data?.downloader_available === true;
+    } catch {
+        downloaderAvailable = false;
+    }
 }
 
 function handleSearchKeydown(event) {
@@ -572,6 +583,19 @@ function renderOnlineVersion(version, resultGroup) {
         });
     });
     row.appendChild(play);
+    if (downloaderAvailable && typeof searchActions.downloadOnline === 'function') {
+        const download = document.createElement('button');
+        download.type = 'button';
+        download.className = 'online-search-download';
+        download.setAttribute('aria-label', `下载 ${version.source_name || '在线'} 版本`);
+        download.appendChild(createIcon('download'));
+        download.addEventListener('click', () => {
+            download.disabled = true;
+            Promise.resolve(searchActions.downloadOnline(version.candidate_id))
+                .finally(() => { download.disabled = false; });
+        });
+        row.appendChild(download);
+    }
     return row;
 }
 

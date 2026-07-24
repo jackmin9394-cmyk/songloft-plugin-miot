@@ -221,3 +221,40 @@ test('rejects unknown candidates without invoking playback', async () => {
   assert.equal(await service.playOnline('missing', 'account', 'device'), false);
   assert.equal(calls, 0);
 });
+
+test('imports the exact cached candidate and hands only its real song id to Downloader V1', async () => {
+  const imported: unknown[] = [];
+  const enqueued: number[] = [];
+  const indexing = {
+    searchLocal: async (query: string) => localResults(query),
+    addImportedSong: (song: unknown) => imported.push(song),
+  };
+  const online = {
+    searchAllDetailed: async () => ({
+      hits: [{
+        source_id: 'a',
+        source_name: 'A',
+        result: { title: 'Online', artist: 'Artist', url: 'https://example.test/audio' },
+      }],
+      status: 'available' as const,
+    }),
+    importSearchResult: async () => ({ id: 321, url: '/api/v1/songs/321/play' }),
+  };
+  const downloader = {
+    isAvailable: async () => true,
+    enqueue: async (songId: number) => {
+      enqueued.push(songId);
+      return { task_id: 'download-1' };
+    },
+  };
+  const service = new SearchService(indexing as any, online as any, {
+    minaService: {} as any,
+    playlistManagerMap: {} as any,
+    downloaderClient: downloader as any,
+  });
+  const result = await service.search('Online', { includeOnline: true });
+  const task = await service.downloadOnline(result.online[0].versions[0].candidate_id);
+  assert.deepEqual(task, { task_id: 'download-1', song_id: 321 });
+  assert.deepEqual(enqueued, [321]);
+  assert.deepEqual(imported, [{ id: 321, title: 'Online', artist: 'Artist', album: undefined }]);
+});

@@ -3,6 +3,7 @@ import type { OnlineSearchHit } from '../voicecmd/online_searcher';
 import { OnlineSearcher } from '../voicecmd/online_searcher';
 import type { MinaService } from '../service/service';
 import type { PlaylistManagerMap } from '../player/manager';
+import type { DownloaderClient } from '../downloader/client';
 
 const CANDIDATE_TTL_MS = 2 * 60 * 1000;
 const MAX_CACHED_CANDIDATES = 100;
@@ -36,6 +37,7 @@ export interface UnifiedSearchResults extends LocalSearchResults {
 interface PlaybackDependencies {
   minaService: MinaService;
   playlistManagerMap: PlaylistManagerMap;
+  downloaderClient?: DownloaderClient;
 }
 
 interface CachedCandidate {
@@ -116,6 +118,30 @@ export class SearchService {
       this.indexingManager,
       manager,
     );
+  }
+
+  async downloaderAvailable(): Promise<boolean> {
+    return this.playback?.downloaderClient
+      ? await this.playback.downloaderClient.isAvailable()
+      : false;
+  }
+
+  async downloadOnline(candidateId: string): Promise<{ task_id: string; song_id: number } | null> {
+    this.pruneCandidates();
+    const cached = this.candidates.get(candidateId);
+    const downloader = this.playback?.downloaderClient;
+    if (!cached || cached.expiresAt <= Date.now() || !downloader) return null;
+    if (!(await downloader.isAvailable())) return null;
+    const imported = await this.onlineSearcher.importSearchResult(cached.hit.result);
+    if (!imported) return null;
+    this.indexingManager.addImportedSong({
+      id: imported.id,
+      title: cached.hit.result.title,
+      artist: cached.hit.result.artist,
+      album: cached.hit.result.album,
+    });
+    const task = await downloader.enqueue(imported.id);
+    return task ? { task_id: task.task_id, song_id: imported.id } : null;
   }
 
   private groupOnlineHits(hits: OnlineSearchHit[]): OnlineSearchGroup[] {
