@@ -37,11 +37,21 @@ export interface OnlineSearchResult {
   lyric_source?: string;
 }
 
+export interface OnlineSearchHit {
+  source_id: string;
+  source_name: string;
+  result: OnlineSearchResult;
+}
+
 // 外部搜索 API 响应
 interface SearchOneResponse {
   code: number;
   msg: string;
   data: OnlineSearchResult | null;
+}
+
+function normalizeSearchLength(value: string): number {
+  return Array.from((value || '').trim()).length;
 }
 
 // songloft /api/v1/songs/remote 请求体（provider 中立）
@@ -162,12 +172,52 @@ export class OnlineSearcher {
     for (let i = 0; i < tasks.length; i++) {
       const r = await tasks[i];
       if (r) {
-        songloft.log.info(`[OnlineSearcher] Hit from source[${i}] "${sources[i].name || sources[i].url}" for keyword: ${keyword}`);
+        songloft.log.info(
+          `[OnlineSearcher] hit sourceIndex=${i} source="${sources[i].name || `provider-${i + 1}`}"`
+          + ` queryLength=${normalizeSearchLength(keyword)}`,
+        );
         return r;
       }
     }
-    songloft.log.warn('[OnlineSearcher] No source matched for keyword: ' + keyword);
+    songloft.log.warn(
+      '[OnlineSearcher] no source matched queryLength=' + normalizeSearchLength(keyword),
+    );
     return null;
+  }
+
+  /**
+   * 统一搜索 UI 使用的多源聚合。所有源并发且各自有界；返回顺序始终与配置顺序一致。
+   * 只公开 provider 显示身份和中立候选，不公开源 URL、认证信息或私有配置。
+   */
+  async searchAll(
+    keyword: string,
+    hint: { title: string; artist?: string; duration?: number } | null,
+  ): Promise<OnlineSearchHit[]> {
+    const sources = await this.getEnabledSources();
+    if (sources.length === 0) return [];
+
+    const config = await this.configManager.getConfig();
+    const timeoutSec = config.external_search_timeout > 0 ? config.external_search_timeout : 6;
+    const timeoutMs = timeoutSec * 1000;
+    const results = await Promise.all(
+      sources.map(source => this.searchOne(source, keyword, hint, timeoutMs)),
+    );
+
+    const hits: OnlineSearchHit[] = [];
+    for (let index = 0; index < results.length; index++) {
+      const result = results[index];
+      if (!result) continue;
+      hits.push({
+        source_id: sources[index].id,
+        source_name: sources[index].name || `provider-${index + 1}`,
+        result,
+      });
+    }
+    songloft.log.info(
+      `[OnlineSearcher] aggregate completed sources=${sources.length} hits=${hits.length}`
+      + ` queryLength=${normalizeSearchLength(keyword)}`,
+    );
+    return hits;
   }
 
   /**
@@ -188,15 +238,19 @@ export class OnlineSearcher {
     let resp: SearchOneResponse | null = null;
 
     // 带超时的 fetch（用 Promise.race 替代 AbortController，兼容 QuickJS）
+    let timeoutTimer: ReturnType<typeof setTimeout> | undefined;
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error('AbortError')), timeoutMs);
+      timeoutTimer = setTimeout(() => reject(new Error('AbortError')), timeoutMs);
     });
 
     try {
       const baseUrl = await this.resolveSourceUrl(source);
       if (!baseUrl) return null;
       const authToken = await this.resolveSourceToken(source);
-      songloft.log.info('[OnlineSearcher] [Diag] Request POST ' + baseUrl + ' body=' + JSON.stringify(reqBody));
+      songloft.log.info(
+        '[OnlineSearcher] [Diag] Request provider=' + (source.name || 'unnamed')
+        + ' queryLength=' + normalizeSearchLength(keyword) + ' hasHint=' + !!hint,
+      );
       const fetchPromise = fetch(baseUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: authToken },
@@ -205,25 +259,39 @@ export class OnlineSearcher {
       const fetchResp = await Promise.race([fetchPromise, timeoutPromise]);
 
       const text = await fetchResp.text();
-      songloft.log.info('[OnlineSearcher] [Diag] Response status=' + fetchResp.status + ' body=' + text);
       try {
         resp = JSON.parse(text) as SearchOneResponse;
       } catch {
-        songloft.log.warn('[OnlineSearcher] Failed to parse search/topone response: ' + text);
+        songloft.log.warn('[OnlineSearcher] Failed to parse search/topone response: status=' + fetchResp.status + ' bodyLength=' + text.length);
         return null;
       }
+      const responseUrl = (resp?.data?.url || '').trim();
+      songloft.log.info(
+        '[OnlineSearcher] [Diag] Response status=' + fetchResp.status
+        + ' code=' + String(resp?.code ?? 'null')
+        + ' hasData=' + !!resp?.data
+        + ' hasDirectUrl=' + (responseUrl.startsWith('http://') || responseUrl.startsWith('https://')),
+      );
     } catch (e: any) {
       if (e.message === 'AbortError') {
-        songloft.log.warn(`[OnlineSearcher] Search/topone timeout (>${timeoutMs / 1000}s) for source "${source.name || source.url}" keyword: ` + keyword);
+        songloft.log.warn(
+          `[OnlineSearcher] Search/topone timeout (>${timeoutMs / 1000}s)`
+          + ` source="${source.name || 'unnamed'}" queryLength=${normalizeSearchLength(keyword)}`,
+        );
       } else {
-        songloft.log.warn('[OnlineSearcher] Search/topone fetch error: ' + String(e));
+        songloft.log.warn('[OnlineSearcher] Search/topone fetch error: name=' + (e?.name || 'Error'));
       }
       return null;
+    } finally {
+      if (timeoutTimer !== undefined) clearTimeout(timeoutTimer);
     }
 
     // 解析响应
     if (!resp || resp.code !== 0 || !resp.data) {
-      songloft.log.warn('[OnlineSearcher] Search/topone returned code=' + (resp?.code ?? 'null') + ' for keyword: ' + keyword);
+      songloft.log.warn(
+        '[OnlineSearcher] Search/topone returned code=' + (resp?.code ?? 'null')
+        + ' queryLength=' + normalizeSearchLength(keyword),
+      );
       return null;
     }
 

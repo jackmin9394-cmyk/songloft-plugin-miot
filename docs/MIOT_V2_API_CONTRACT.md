@@ -1052,6 +1052,19 @@ MIoT 是调用方，不提供该路由
 
 当前仓库不能确认每个 provider 已经实际部署该路由。
 
+```text
+统一搜索后端:
+GET /api/v1/jsplugin/miot/search
+参数 query=<文本>
+可选 playlist_id=<本地歌单 ID>
+可选 include_online=1
+```
+
+响应继续使用 MIoT HTTP handler 的 `{ success, data }` 外层。`data` 固定包含
+`query`、`songs`、`playlists`、`artists`、`albums`、`online`；`online`
+中的每项仅包含 provider 显示身份与中立 topone 候选。provider URL、认证信息
+和内部配置不进入响应。在线源失败不得抹除本地结果。
+
 ### 28.2 候选外部 Downloader 合同，尚未验证
 
 ```text

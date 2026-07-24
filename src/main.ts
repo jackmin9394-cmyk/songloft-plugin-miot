@@ -27,6 +27,9 @@ import { registerIndexingHandlers } from './handlers/indexing';
 import { registerMemoryHandlers } from './handlers/memory';
 import { registerLyricHandlers } from './handlers/lyric';
 import { registerSearchProviderComm } from './handlers/search_registry';
+import { registerSearchHandlers } from './handlers/search';
+import { SearchService } from './search/service';
+import { OnlineSearcher } from './voicecmd/online_searcher';
 import { setHostBaseUrl } from './utils/http';
 import { setPollDebug } from './utils/debug';
 import { initStatusStream, handleStatusWebSocket, WS_STATUS_PATH } from './ws/status-stream';
@@ -99,6 +102,11 @@ async function onInit(): Promise<void> {
   registerScheduleHandlers(router, scheduler, configManager);
   registerVoiceCommandHandlers(router, configManager, voiceEngine);
   registerIndexingHandlers(router, indexingManager);
+  registerSearchHandlers(
+    router,
+    indexingManager,
+    new SearchService(indexingManager, new OnlineSearcher(configManager)),
+  );
   registerMemoryHandlers(router, memoryService, configManager);
   registerLyricHandlers(router);
 
