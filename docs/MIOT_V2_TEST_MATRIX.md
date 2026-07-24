@@ -167,6 +167,20 @@
 - [ ] base path 部署不会重复或丢失路径前缀
 - [ ] `npm run test:media-proxy` 通过
 
+### 4.2A External Playback State 与口令测试结果
+
+- [x] no-import 直链播放成功后登记外部播放状态
+- [x] 独立远程歌曲播放成功后登记外部播放状态
+- [x] HTTP `/player/status` 与 WebSocket 共用同一状态融合出口
+- [x] 外部状态不保存上游 URL、签名 query 或 Media Proxy token
+- [x] 外部播放支持暂停、恢复与停止
+- [x] 切换到本地歌单播放时清理旧外部状态
+- [x] 规则口令的 `executed` 传播真实设备操作结果
+- [x] AI 口令的 `executed` 传播真实设备操作结果
+- [x] 匹配成功但执行失败时返回明确、稳定的说明
+- [x] `npm run test:external-playback` 通过
+- [x] `npm run test:test-command` 通过
+
 ### 4.3 设备四态语义
 
 - [ ] 在独立阶段审计可靠状态来源

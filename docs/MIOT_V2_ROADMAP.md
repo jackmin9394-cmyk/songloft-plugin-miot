@@ -696,6 +696,14 @@ Downloader 未安装或未 active 时：
 - 音量
 - 进度条
 
+本地实现状态（2026-07-24）：
+
+- External Playback State 已接入 `PlaylistManager`：no-import、独立远程歌曲与歌单播放共用 HTTP/WS 状态出口。
+- 外部播放仅保存标题、歌手、时长等非敏感展示元数据，不保存上游 URL 或 Media Proxy token。
+- 外部播放支持设备暂停、恢复与停止；开始本地歌单播放时会清理旧的外部状态。
+- `testCommand` 的 `executed` 已改为传播真实执行结果；匹配成功但设备操作失败时返回 `false` 和稳定说明。
+- 专项命令：`npm run test:external-playback`、`npm run test:test-command`。
+
 ### 阶段 7A：single-once 独立兼容决策
 
 - 确认保留、迁移或移除策略
